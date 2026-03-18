@@ -1,0 +1,43 @@
+[
+  {
+    "model_id": "model_20260318T165146460173Z",
+    "model_path": "models\\multi_asset_paper_24\\fet_usdt\\model_20260318T165146460173Z.json",
+    "created_at": "2026-03-18T16:51:46.489847+00:00",
+    "train_start": "2025-09-19T17:49:00+00:00",
+    "train_end": "2026-02-03T21:37:00+00:00",
+    "val_start": "2026-02-03T21:38:00+00:00",
+    "val_end": "2026-03-18T16:26:00+00:00",
+    "metrics": {
+      "auc_val": 0.5293769333248849,
+      "sharpe": 3.8529078937771684,
+      "precision_buy": 0.5428571428571428,
+      "win_rate": 0.5571428571428572,
+      "max_drawdown": 0.2630227096599438
+    },
+    "promoted": false,
+    "feature_names": [
+      "atr_pct",
+      "hour_cos",
+      "ret_60",
+      "realized_vol_20",
+      "price_vs_ema_trend",
+      "hour_sin",
+      "day_of_week_sin",
+      "hl_ratio",
+      "trend_slope_pct",
+      "macd_hist",
+      "volume_ratio",
+      "ret_30",
+      "volume_trend",
+      "rsi_14",
+      "day_of_week_cos",
+      "ret_1",
+      "ret_5",
+      "body_to_range_ratio",
+      "close_position_in_candle",
+      "ema_full_alignment",
+      "rsi_divergence"
+    ],
+    "n_features": 21
+  }
+]

@@ -1,0 +1,27 @@
+{
+  "model_id": "model_20260318T163246009166Z",
+  "model_path": "models\\multi_asset_paper_24\\bonk_usdt\\active_model.json",
+  "feature_names": [
+    "realized_vol_20",
+    "hour_cos",
+    "ret_60",
+    "price_vs_ema_trend",
+    "hour_sin",
+    "day_of_week_sin",
+    "ret_30",
+    "position_in_range_20",
+    "price_vs_ema_fast",
+    "macd_hist",
+    "volume_trend",
+    "trend_slope_pct",
+    "hl_ratio",
+    "volume_ratio",
+    "day_of_week_cos",
+    "ema_full_alignment",
+    "ret_15",
+    "body_to_range_ratio",
+    "ret_5",
+    "ret_1",
+    "close_position_in_candle"
+  ]
+}

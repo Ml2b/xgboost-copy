@@ -1,0 +1,45 @@
+services:
+  - type: worker
+    name: xgboost-trader
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scripts/render_start.py
+    plan: starter
+    disk:
+      name: runtime-storage
+      mountPath: /opt/render/project/src/runtime
+      sizeGB: 5
+    envVars:
+      - key: REDIS_HOST
+        fromService:
+          name: xgboost-redis
+          type: redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          name: xgboost-redis
+          type: redis
+          property: port
+      - key: COINBASE_CREDENTIALS_PATH
+        value: /etc/secrets/coinbase_api_key.json
+      - key: MODEL_REGISTRY_ROOT
+        value: /opt/render/project/src/runtime/models/multi_asset_paper_24
+      - key: TRAINER_HISTORY_DB_PATH
+        value: /opt/render/project/src/runtime/trainer_candle_history.sqlite3
+      - key: EXECUTION_ENABLED
+        value: "true"
+      - key: EXECUTION_DRY_RUN
+        value: "true"
+      - key: PAPER_TRADING_ENABLED
+        value: "true"
+      - key: OBSERVED_BASES_CSV
+        value: BTC,ETH,SOL,XRP,ADA,DOGE,AVAX,DOT,LINK,LTC,BCH,UNI,PEPE,BONK,FARTCOIN,TAO,SUI,HBAR,FET,AAVE,XLM,ONDO,AKT,PENGU
+      - key: EXECUTION_ALLOWED_BASES_CSV
+        value: BTC,ETH,SOL,XRP,ADA,DOGE,AVAX,DOT,LINK,LTC,BCH,UNI,PEPE,BONK,FARTCOIN,TAO,SUI,HBAR,FET,AAVE,XLM,ONDO,AKT,PENGU
+      - key: PAPER_INITIAL_CASH
+        value: "10000"
+
+  - type: redis
+    name: xgboost-redis
+    plan: starter
+    maxmemoryPolicy: noeviction

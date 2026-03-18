@@ -1,0 +1,28 @@
+{
+  "model_id": "model_20260318T165601461456Z",
+  "model_path": "models\\multi_asset_paper_24\\aave_usdt\\active_model.json",
+  "feature_names": [
+    "atr_pct",
+    "realized_vol_20",
+    "hour_cos",
+    "price_vs_ema_trend",
+    "ret_60",
+    "hour_sin",
+    "ret_30",
+    "trend_slope_pct",
+    "ret_15",
+    "rsi_14",
+    "day_of_week_sin",
+    "day_of_week_cos",
+    "hl_ratio",
+    "macd_hist",
+    "close_position_in_candle",
+    "ret_5",
+    "volume_trend",
+    "body_to_range_ratio",
+    "volume_ratio",
+    "ret_1",
+    "ema_fast_above_slow",
+    "ema_full_alignment"
+  ]
+}

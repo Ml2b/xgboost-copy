@@ -1,0 +1,1 @@
+"""Validacion temporal del sistema."""

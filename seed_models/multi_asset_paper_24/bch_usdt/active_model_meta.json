@@ -1,0 +1,27 @@
+{
+  "model_id": "model_20260318T024529170439Z",
+  "model_path": "models\\multi_asset_paper_24\\bch_usdt\\active_model.json",
+  "feature_names": [
+    "day_of_week_sin",
+    "realized_vol_20",
+    "ret_30",
+    "hl_ratio",
+    "ret_60",
+    "macd_hist",
+    "position_in_range_20",
+    "ret_1",
+    "trend_slope_pct",
+    "hour_sin",
+    "volume_trend",
+    "volume_ratio",
+    "day_of_week_cos",
+    "hour_cos",
+    "close_position_in_candle",
+    "ema_full_alignment",
+    "body_to_range_ratio",
+    "rsi_divergence",
+    "macd_cross_down",
+    "volume_spike",
+    "macd_cross_up"
+  ]
+}

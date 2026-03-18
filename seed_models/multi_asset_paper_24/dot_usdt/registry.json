@@ -1,0 +1,44 @@
+[
+  {
+    "model_id": "model_20260318T023957676530Z",
+    "model_path": "models\\multi_asset_paper_24\\dot_usdt\\model_20260318T023957676530Z.json",
+    "created_at": "2026-03-18T02:39:57.689065+00:00",
+    "train_start": "2025-09-19T03:42:00+00:00",
+    "train_end": "2026-02-05T17:28:00+00:00",
+    "val_start": "2026-02-05T17:31:00+00:00",
+    "val_end": "2026-03-16T10:25:00+00:00",
+    "metrics": {
+      "auc_val": 0.46298625083836353,
+      "sharpe": 0.8855581819412764,
+      "precision_buy": 0.46511627906976744,
+      "win_rate": 0.46511627906976744,
+      "max_drawdown": 0.6737895865130245
+    },
+    "promoted": false,
+    "feature_names": [
+      "day_of_week_sin",
+      "macd_hist",
+      "realized_vol_20",
+      "hl_ratio",
+      "rsi_14",
+      "ret_5",
+      "ret_60",
+      "trend_slope_pct",
+      "ret_30",
+      "hour_cos",
+      "volume_trend",
+      "ret_1",
+      "volume_ratio",
+      "hour_sin",
+      "day_of_week_cos",
+      "body_to_range_ratio",
+      "close_position_in_candle",
+      "macd_cross_down",
+      "macd_cross_up",
+      "ema_fast_above_slow",
+      "ema_full_alignment",
+      "volume_spike"
+    ],
+    "n_features": 22
+  }
+]

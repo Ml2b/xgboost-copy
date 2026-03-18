@@ -1,0 +1,40 @@
+[
+  {
+    "model_id": "model_20260318T163618065168Z",
+    "model_path": "models\\multi_asset_paper_24\\fartcoin_usdt\\model_20260318T163618065168Z.json",
+    "created_at": "2026-03-18T16:36:18.088192+00:00",
+    "train_start": "2025-09-19T17:33:00+00:00",
+    "train_end": "2026-02-08T01:06:00+00:00",
+    "val_start": "2026-02-08T01:07:00+00:00",
+    "val_end": "2026-03-18T16:15:00+00:00",
+    "metrics": {
+      "auc_val": 0.5253691326171104,
+      "sharpe": 0.25548397966256714,
+      "precision_buy": 0.6190476190476191,
+      "win_rate": 0.6666666666666666,
+      "max_drawdown": 0.08256605950579032
+    },
+    "promoted": false,
+    "feature_names": [
+      "hour_cos",
+      "ret_60",
+      "price_vs_ema_trend",
+      "hour_sin",
+      "macd_hist",
+      "ret_30",
+      "volume_trend",
+      "trend_slope_pct",
+      "day_of_week_sin",
+      "rsi_14",
+      "ret_5",
+      "volume_ratio",
+      "day_of_week_cos",
+      "hl_ratio",
+      "ret_15",
+      "ret_1",
+      "body_to_range_ratio",
+      "close_position_in_candle"
+    ],
+    "n_features": 18
+  }
+]

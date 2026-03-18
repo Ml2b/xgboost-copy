@@ -1,0 +1,42 @@
+[
+  {
+    "model_id": "model_20260318T164012894718Z",
+    "model_path": "models\\multi_asset_paper_24\\tao_usdt\\model_20260318T164012894718Z.json",
+    "created_at": "2026-03-18T16:40:12.916590+00:00",
+    "train_start": "2025-09-19T17:37:00+00:00",
+    "train_end": "2026-02-20T11:38:00+00:00",
+    "val_start": "2026-02-20T11:39:00+00:00",
+    "val_end": "2026-03-18T16:21:00+00:00",
+    "metrics": {
+      "auc_val": 0.5499946063839448,
+      "sharpe": 0.107838230426909,
+      "precision_buy": 0.3333333333333333,
+      "win_rate": 0.3333333333333333,
+      "max_drawdown": 0.006557006483909443
+    },
+    "promoted": true,
+    "feature_names": [
+      "atr_pct",
+      "price_vs_ema_trend",
+      "hour_cos",
+      "hour_sin",
+      "ret_60",
+      "macd_hist",
+      "ret_5",
+      "rsi_14",
+      "volume_trend",
+      "day_of_week_sin",
+      "hl_ratio",
+      "trend_slope_pct",
+      "ret_1",
+      "volume_ratio",
+      "close_position_in_candle",
+      "ema_full_alignment",
+      "body_to_range_ratio",
+      "day_of_week_cos",
+      "ema_fast_above_slow",
+      "macd_cross_up"
+    ],
+    "n_features": 20
+  }
+]

@@ -1,0 +1,28 @@
+{
+  "model_id": "model_20260318T192139532065Z",
+  "model_path": "models\\multi_asset_paper_24\\pengu_usd\\active_model.json",
+  "feature_names": [
+    "atr_pct",
+    "ret_30",
+    "macd_hist",
+    "hour_sin",
+    "realized_vol_20",
+    "ret_60",
+    "hour_cos",
+    "bb_width",
+    "trend_slope_pct",
+    "day_of_week_sin",
+    "rsi_14",
+    "volume_trend",
+    "price_vs_ema_fast",
+    "hl_ratio",
+    "day_of_week_cos",
+    "ema_full_alignment",
+    "volume_ratio",
+    "ret_1",
+    "close_position_in_candle",
+    "body_to_range_ratio",
+    "rsi_divergence",
+    "macd_cross_down"
+  ]
+}

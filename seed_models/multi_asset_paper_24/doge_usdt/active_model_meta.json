@@ -1,0 +1,26 @@
+{
+  "model_id": "model_20260318T023624497112Z",
+  "model_path": "models\\multi_asset_paper_24\\doge_usdt\\model_20260318T023624497112Z.json",
+  "feature_names": [
+    "hour_cos",
+    "realized_vol_20",
+    "day_of_week_sin",
+    "rsi_14",
+    "ret_60",
+    "hour_sin",
+    "day_of_week_cos",
+    "trend_slope_pct",
+    "macd_hist",
+    "ret_5",
+    "hl_ratio",
+    "ret_1",
+    "volume_trend",
+    "volume_ratio",
+    "close_position_in_candle",
+    "ema_full_alignment",
+    "body_to_range_ratio",
+    "ema_fast_above_slow",
+    "macd_cross_up",
+    "rsi_divergence"
+  ]
+}

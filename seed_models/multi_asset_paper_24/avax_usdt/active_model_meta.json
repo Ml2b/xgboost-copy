@@ -1,0 +1,24 @@
+{
+  "model_id": "model_20260318T023813107615Z",
+  "model_path": "models\\multi_asset_paper_24\\avax_usdt\\model_20260318T023813107615Z.json",
+  "feature_names": [
+    "day_of_week_cos",
+    "day_of_week_sin",
+    "hour_cos",
+    "realized_vol_20",
+    "ret_60",
+    "close_position_in_candle",
+    "rsi_14",
+    "hour_sin",
+    "ret_30",
+    "hl_ratio",
+    "volume_ratio",
+    "ret_1",
+    "macd_hist",
+    "trend_slope_pct",
+    "volume_trend",
+    "body_to_range_ratio",
+    "rsi_divergence",
+    "ema_full_alignment"
+  ]
+}

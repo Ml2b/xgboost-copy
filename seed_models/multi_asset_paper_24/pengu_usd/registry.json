@@ -1,0 +1,44 @@
+[
+  {
+    "model_id": "model_20260318T192139532065Z",
+    "model_path": "models\\multi_asset_paper_24\\pengu_usd\\model_20260318T192139532065Z.json",
+    "created_at": "2026-03-18T19:21:39.547620+00:00",
+    "train_start": "2025-09-19T20:20:00+00:00",
+    "train_end": "2025-10-20T11:05:00+00:00",
+    "val_start": "2025-10-20T11:06:00+00:00",
+    "val_end": "2025-10-25T14:53:00+00:00",
+    "metrics": {
+      "auc_val": 0.5301994553002571,
+      "sharpe": -0.5622402982778272,
+      "precision_buy": 0.4,
+      "win_rate": 0.4666666666666667,
+      "max_drawdown": 0.02447193083450072
+    },
+    "promoted": true,
+    "feature_names": [
+      "atr_pct",
+      "ret_30",
+      "macd_hist",
+      "hour_sin",
+      "realized_vol_20",
+      "ret_60",
+      "hour_cos",
+      "bb_width",
+      "trend_slope_pct",
+      "day_of_week_sin",
+      "rsi_14",
+      "volume_trend",
+      "price_vs_ema_fast",
+      "hl_ratio",
+      "day_of_week_cos",
+      "ema_full_alignment",
+      "volume_ratio",
+      "ret_1",
+      "close_position_in_candle",
+      "body_to_range_ratio",
+      "rsi_divergence",
+      "macd_cross_down"
+    ],
+    "n_features": 22
+  }
+]

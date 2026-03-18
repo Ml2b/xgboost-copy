@@ -1,0 +1,29 @@
+{
+  "model_id": "model_20260318T024147040298Z",
+  "model_path": "models\\multi_asset_paper_24\\link_usdt\\model_20260318T024147040298Z.json",
+  "feature_names": [
+    "hour_cos",
+    "day_of_week_sin",
+    "atr_pct",
+    "ret_60",
+    "day_of_week_cos",
+    "ret_30",
+    "hour_sin",
+    "bb_width",
+    "hl_ratio",
+    "ret_5",
+    "macd_hist",
+    "rsi_14",
+    "volume_trend",
+    "ret_1",
+    "trend_slope_pct",
+    "close_position_in_candle",
+    "volume_ratio",
+    "body_to_range_ratio",
+    "macd_cross_up",
+    "macd_cross_down",
+    "ema_fast_above_slow",
+    "volume_spike",
+    "rsi_divergence"
+  ]
+}

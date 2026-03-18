@@ -1,0 +1,26 @@
+{
+  "model_id": "model_20260318T023242188017Z",
+  "model_path": "models\\multi_asset_paper_24\\xrp_usdt\\model_20260318T023242188017Z.json",
+  "feature_names": [
+    "day_of_week_cos",
+    "hour_cos",
+    "day_of_week_sin",
+    "ret_60",
+    "realized_vol_20",
+    "rsi_14",
+    "hour_sin",
+    "volume_trend",
+    "ret_1",
+    "price_vs_ema_trend",
+    "hl_ratio",
+    "ret_5",
+    "volume_ratio",
+    "ret_15",
+    "macd_hist",
+    "close_position_in_candle",
+    "body_to_range_ratio",
+    "ema_full_alignment",
+    "rsi_divergence",
+    "macd_cross_down"
+  ]
+}

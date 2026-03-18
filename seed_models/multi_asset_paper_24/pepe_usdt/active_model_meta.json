@@ -1,0 +1,28 @@
+{
+  "model_id": "model_20260318T162910678178Z",
+  "model_path": "models\\multi_asset_paper_24\\pepe_usdt\\active_model.json",
+  "feature_names": [
+    "ret_30",
+    "atr_pct",
+    "hour_cos",
+    "hour_sin",
+    "price_vs_ema_trend",
+    "ret_60",
+    "day_of_week_sin",
+    "trend_slope_pct",
+    "macd_hist",
+    "volume_trend",
+    "rsi_14",
+    "ret_1",
+    "hl_ratio",
+    "ret_5",
+    "volume_ratio",
+    "body_to_range_ratio",
+    "price_vs_ema_fast",
+    "day_of_week_cos",
+    "ret_15",
+    "close_position_in_candle",
+    "ema_full_alignment",
+    "ema_fast_above_slow"
+  ]
+}

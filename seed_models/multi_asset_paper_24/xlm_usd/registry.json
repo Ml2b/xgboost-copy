@@ -1,0 +1,41 @@
+[
+  {
+    "model_id": "model_20260318T191438837743Z",
+    "model_path": "models\\multi_asset_paper_24\\xlm_usd\\model_20260318T191438837743Z.json",
+    "created_at": "2026-03-18T19:14:38.861975+00:00",
+    "train_start": "2025-09-19T20:13:00+00:00",
+    "train_end": "2025-10-20T05:30:00+00:00",
+    "val_start": "2025-10-20T05:31:00+00:00",
+    "val_end": "2025-10-25T14:55:00+00:00",
+    "metrics": {
+      "auc_val": 0.5848934058024967,
+      "sharpe": 1.5629448894329354,
+      "precision_buy": 0.75,
+      "win_rate": 0.75,
+      "max_drawdown": 0.0028722901064249795
+    },
+    "promoted": true,
+    "feature_names": [
+      "atr_pct",
+      "day_of_week_sin",
+      "hour_cos",
+      "hour_sin",
+      "price_vs_ema_trend",
+      "ret_60",
+      "position_in_range_20",
+      "trend_slope_pct",
+      "bb_width",
+      "macd_hist",
+      "volume_ratio",
+      "volume_trend",
+      "price_vs_ema_fast",
+      "day_of_week_cos",
+      "hl_ratio",
+      "ema_full_alignment",
+      "body_to_range_ratio",
+      "ret_1",
+      "ema_fast_above_slow"
+    ],
+    "n_features": 19
+  }
+]

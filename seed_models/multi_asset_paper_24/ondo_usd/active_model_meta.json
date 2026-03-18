@@ -1,0 +1,25 @@
+{
+  "model_id": "model_20260318T191626606711Z",
+  "model_path": "models\\multi_asset_paper_24\\ondo_usd\\active_model.json",
+  "feature_names": [
+    "atr_pct",
+    "price_vs_ema_trend",
+    "ret_60",
+    "hour_sin",
+    "hour_cos",
+    "macd_hist",
+    "day_of_week_sin",
+    "bb_width",
+    "position_in_range_20",
+    "trend_slope_pct",
+    "volume_trend",
+    "ret_5",
+    "volume_ratio",
+    "day_of_week_cos",
+    "close_position_in_candle",
+    "hl_ratio",
+    "ema_full_alignment",
+    "body_to_range_ratio",
+    "ret_1"
+  ]
+}

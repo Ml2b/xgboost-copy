@@ -1,0 +1,27 @@
+{
+  "model_id": "model_20260318T165146460173Z",
+  "model_path": "models\\multi_asset_paper_24\\fet_usdt\\model_20260318T165146460173Z.json",
+  "feature_names": [
+    "atr_pct",
+    "hour_cos",
+    "ret_60",
+    "realized_vol_20",
+    "price_vs_ema_trend",
+    "hour_sin",
+    "day_of_week_sin",
+    "hl_ratio",
+    "trend_slope_pct",
+    "macd_hist",
+    "volume_ratio",
+    "ret_30",
+    "volume_trend",
+    "rsi_14",
+    "day_of_week_cos",
+    "ret_1",
+    "ret_5",
+    "body_to_range_ratio",
+    "close_position_in_candle",
+    "ema_full_alignment",
+    "rsi_divergence"
+  ]
+}

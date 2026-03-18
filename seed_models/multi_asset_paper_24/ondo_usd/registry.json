@@ -1,0 +1,41 @@
+[
+  {
+    "model_id": "model_20260318T191626606711Z",
+    "model_path": "models\\multi_asset_paper_24\\ondo_usd\\model_20260318T191626606711Z.json",
+    "created_at": "2026-03-18T19:16:26.629849+00:00",
+    "train_start": "2025-09-19T20:15:00+00:00",
+    "train_end": "2025-10-20T05:23:00+00:00",
+    "val_start": "2025-10-20T05:24:00+00:00",
+    "val_end": "2025-10-25T14:57:00+00:00",
+    "metrics": {
+      "auc_val": 0.5788749550940647,
+      "sharpe": 3.835999537503992,
+      "precision_buy": 0.8571428571428571,
+      "win_rate": 0.8571428571428571,
+      "max_drawdown": 0.0018538597354483821
+    },
+    "promoted": true,
+    "feature_names": [
+      "atr_pct",
+      "price_vs_ema_trend",
+      "ret_60",
+      "hour_sin",
+      "hour_cos",
+      "macd_hist",
+      "day_of_week_sin",
+      "bb_width",
+      "position_in_range_20",
+      "trend_slope_pct",
+      "volume_trend",
+      "ret_5",
+      "volume_ratio",
+      "day_of_week_cos",
+      "close_position_in_candle",
+      "hl_ratio",
+      "ema_full_alignment",
+      "body_to_range_ratio",
+      "ret_1"
+    ],
+    "n_features": 19
+  }
+]

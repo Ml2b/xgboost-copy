@@ -1,0 +1,44 @@
+[
+  {
+    "model_id": "model_20260318T165601461456Z",
+    "model_path": "models\\multi_asset_paper_24\\aave_usdt\\model_20260318T165601461456Z.json",
+    "created_at": "2026-03-18T16:56:01.483917+00:00",
+    "train_start": "2025-09-19T17:52:00+00:00",
+    "train_end": "2026-02-19T16:29:00+00:00",
+    "val_start": "2026-02-19T16:30:00+00:00",
+    "val_end": "2026-03-18T16:36:00+00:00",
+    "metrics": {
+      "auc_val": 0.5717053491159539,
+      "sharpe": -2.5149398564989727,
+      "precision_buy": 0.3333333333333333,
+      "win_rate": 0.4074074074074074,
+      "max_drawdown": 0.09566212211888525
+    },
+    "promoted": true,
+    "feature_names": [
+      "atr_pct",
+      "realized_vol_20",
+      "hour_cos",
+      "price_vs_ema_trend",
+      "ret_60",
+      "hour_sin",
+      "ret_30",
+      "trend_slope_pct",
+      "ret_15",
+      "rsi_14",
+      "day_of_week_sin",
+      "day_of_week_cos",
+      "hl_ratio",
+      "macd_hist",
+      "close_position_in_candle",
+      "ret_5",
+      "volume_trend",
+      "body_to_range_ratio",
+      "volume_ratio",
+      "ret_1",
+      "ema_fast_above_slow",
+      "ema_full_alignment"
+    ],
+    "n_features": 22
+  }
+]

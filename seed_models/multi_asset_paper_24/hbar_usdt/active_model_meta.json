@@ -1,0 +1,26 @@
+{
+  "model_id": "model_20260318T164803946152Z",
+  "model_path": "models\\multi_asset_paper_24\\hbar_usdt\\active_model.json",
+  "feature_names": [
+    "hour_cos",
+    "atr_pct",
+    "hour_sin",
+    "macd_hist",
+    "ret_60",
+    "ret_30",
+    "day_of_week_sin",
+    "volume_trend",
+    "price_vs_ema_trend",
+    "volume_ratio",
+    "trend_slope_pct",
+    "close_position_in_candle",
+    "rsi_14",
+    "ret_5",
+    "hl_ratio",
+    "body_to_range_ratio",
+    "ret_1",
+    "day_of_week_cos",
+    "ema_full_alignment",
+    "macd_cross_down"
+  ]
+}

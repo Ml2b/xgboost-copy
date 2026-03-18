@@ -1,0 +1,27 @@
+{
+  "model_id": "model_20260318T022845025123Z",
+  "model_path": "models\\multi_asset_paper_24\\eth_usdt\\active_model.json",
+  "feature_names": [
+    "position_in_range_20",
+    "realized_vol_20",
+    "hour_cos",
+    "hour_sin",
+    "day_of_week_sin",
+    "ret_60",
+    "ret_30",
+    "day_of_week_cos",
+    "price_vs_ema_fast",
+    "bb_width",
+    "ret_1",
+    "hl_ratio",
+    "close_position_in_candle",
+    "trend_slope_pct",
+    "macd_hist",
+    "volume_ratio",
+    "volume_trend",
+    "body_to_range_ratio",
+    "ema_fast_above_slow",
+    "ema_full_alignment",
+    "macd_cross_up"
+  ]
+}

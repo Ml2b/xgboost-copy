@@ -1,0 +1,83 @@
+[
+  {
+    "model_id": "model_20260318T022640739162Z",
+    "model_path": "models\\multi_asset_paper_24\\btc_usdt\\model_20260318T022640739162Z.json",
+    "created_at": "2026-03-18T02:26:40.759678+00:00",
+    "train_start": "2025-09-19T03:30:00+00:00",
+    "train_end": "2026-02-25T23:15:00+00:00",
+    "val_start": "2026-02-25T23:16:00+00:00",
+    "val_end": "2026-03-18T01:14:00+00:00",
+    "metrics": {
+      "auc_val": 0.5642675914330337,
+      "sharpe": 0.0,
+      "precision_buy": 1.0,
+      "win_rate": 1.0,
+      "max_drawdown": 0.0
+    },
+    "promoted": false,
+    "feature_names": [
+      "price_vs_ema_fast",
+      "position_in_range_20",
+      "bb_width",
+      "ret_1",
+      "ret_60",
+      "hour_cos",
+      "price_vs_ema_trend",
+      "rsi_14",
+      "atr_pct",
+      "trend_slope_pct",
+      "day_of_week_sin",
+      "realized_vol_20",
+      "hour_sin",
+      "volume_trend",
+      "close_position_in_candle",
+      "hl_ratio",
+      "macd_hist",
+      "ret_15",
+      "volume_ratio",
+      "body_to_range_ratio",
+      "day_of_week_cos",
+      "ema_fast_above_slow",
+      "volume_spike"
+    ],
+    "n_features": 23
+  },
+  {
+    "model_id": "model_20260318T140744088399Z",
+    "model_path": "models\\multi_asset_paper_24\\btc_usdt\\model_20260318T140744088399Z.json",
+    "created_at": "2026-03-18T14:07:44.113547+00:00",
+    "train_start": "2025-03-23T06:25:00+00:00",
+    "train_end": "2025-11-21T14:30:00+00:00",
+    "val_start": "2025-11-21T14:55:00+00:00",
+    "val_end": "2026-03-18T02:14:00+00:00",
+    "metrics": {
+      "auc_val": 0.5939195275134818,
+      "sharpe": 1.409542369498549,
+      "precision_buy": 0.4827586206896552,
+      "win_rate": 0.5632183908045977,
+      "max_drawdown": 0.05603891893522439
+    },
+    "promoted": true,
+    "feature_names": [
+      "hour_sin",
+      "atr_pct",
+      "day_of_week_sin",
+      "bb_width",
+      "hour_cos",
+      "ret_30",
+      "close_position_in_candle",
+      "position_in_range_20",
+      "volume_ratio",
+      "ret_1",
+      "hl_ratio",
+      "ret_60",
+      "day_of_week_cos",
+      "macd_hist",
+      "volume_trend",
+      "price_vs_ema_fast",
+      "trend_slope_pct",
+      "body_to_range_ratio"
+    ],
+    "n_features": 18
+  }
+]

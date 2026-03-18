@@ -1,0 +1,28 @@
+{
+  "model_id": "model_20260318T164409504360Z",
+  "model_path": "models\\multi_asset_paper_24\\sui_usdt\\active_model.json",
+  "feature_names": [
+    "atr_pct",
+    "price_vs_ema_trend",
+    "hour_cos",
+    "ret_60",
+    "hour_sin",
+    "macd_hist",
+    "ret_5",
+    "ret_30",
+    "day_of_week_sin",
+    "trend_slope_pct",
+    "volume_ratio",
+    "body_to_range_ratio",
+    "hl_ratio",
+    "volume_trend",
+    "close_position_in_candle",
+    "day_of_week_cos",
+    "ret_1",
+    "ret_15",
+    "ema_full_alignment",
+    "macd_cross_down",
+    "ema_fast_above_slow",
+    "rsi_divergence"
+  ]
+}

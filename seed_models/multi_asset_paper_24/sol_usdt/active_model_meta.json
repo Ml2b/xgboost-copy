@@ -1,0 +1,28 @@
+{
+  "model_id": "model_20260318T023043922869Z",
+  "model_path": "models\\multi_asset_paper_24\\sol_usdt\\model_20260318T023043922869Z.json",
+  "feature_names": [
+    "ret_60",
+    "atr_pct",
+    "bb_width",
+    "hour_sin",
+    "day_of_week_sin",
+    "position_in_range_20",
+    "hour_cos",
+    "ret_30",
+    "volume_trend",
+    "macd_hist",
+    "ret_5",
+    "trend_slope_pct",
+    "ret_1",
+    "volume_ratio",
+    "hl_ratio",
+    "close_position_in_candle",
+    "day_of_week_cos",
+    "body_to_range_ratio",
+    "ema_full_alignment",
+    "macd_cross_down",
+    "macd_cross_up",
+    "rsi_divergence"
+  ]
+}

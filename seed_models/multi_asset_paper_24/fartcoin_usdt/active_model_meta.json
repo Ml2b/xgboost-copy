@@ -1,0 +1,24 @@
+{
+  "model_id": "model_20260318T163618065168Z",
+  "model_path": "models\\multi_asset_paper_24\\fartcoin_usdt\\model_20260318T163618065168Z.json",
+  "feature_names": [
+    "hour_cos",
+    "ret_60",
+    "price_vs_ema_trend",
+    "hour_sin",
+    "macd_hist",
+    "ret_30",
+    "volume_trend",
+    "trend_slope_pct",
+    "day_of_week_sin",
+    "rsi_14",
+    "ret_5",
+    "volume_ratio",
+    "day_of_week_cos",
+    "hl_ratio",
+    "ret_15",
+    "ret_1",
+    "body_to_range_ratio",
+    "close_position_in_candle"
+  ]
+}

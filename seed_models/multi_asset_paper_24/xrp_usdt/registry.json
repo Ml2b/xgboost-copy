@@ -1,0 +1,42 @@
+[
+  {
+    "model_id": "model_20260318T023242188017Z",
+    "model_path": "models\\multi_asset_paper_24\\xrp_usdt\\model_20260318T023242188017Z.json",
+    "created_at": "2026-03-18T02:32:42.207023+00:00",
+    "train_start": "2025-09-19T03:35:00+00:00",
+    "train_end": "2026-02-19T08:04:00+00:00",
+    "val_start": "2026-02-19T08:32:00+00:00",
+    "val_end": "2026-03-17T23:08:00+00:00",
+    "metrics": {
+      "auc_val": 0.5022432550713521,
+      "sharpe": 0.21114842343078613,
+      "precision_buy": 0.47368421052631576,
+      "win_rate": 0.5263157894736842,
+      "max_drawdown": 0.029738186434838273
+    },
+    "promoted": false,
+    "feature_names": [
+      "day_of_week_cos",
+      "hour_cos",
+      "day_of_week_sin",
+      "ret_60",
+      "realized_vol_20",
+      "rsi_14",
+      "hour_sin",
+      "volume_trend",
+      "ret_1",
+      "price_vs_ema_trend",
+      "hl_ratio",
+      "ret_5",
+      "volume_ratio",
+      "ret_15",
+      "macd_hist",
+      "close_position_in_candle",
+      "body_to_range_ratio",
+      "ema_full_alignment",
+      "rsi_divergence",
+      "macd_cross_down"
+    ],
+    "n_features": 20
+  }
+]

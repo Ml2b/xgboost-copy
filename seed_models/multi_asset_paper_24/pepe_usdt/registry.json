@@ -1,0 +1,44 @@
+[
+  {
+    "model_id": "model_20260318T162910678178Z",
+    "model_path": "models\\multi_asset_paper_24\\pepe_usdt\\model_20260318T162910678178Z.json",
+    "created_at": "2026-03-18T16:29:10.697735+00:00",
+    "train_start": "2025-09-19T17:26:00+00:00",
+    "train_end": "2026-02-15T19:41:00+00:00",
+    "val_start": "2026-02-15T19:42:00+00:00",
+    "val_end": "2026-03-18T16:09:00+00:00",
+    "metrics": {
+      "auc_val": 0.5396048294458303,
+      "sharpe": -0.06687819546041758,
+      "precision_buy": 0.46153846153846156,
+      "win_rate": 0.5384615384615384,
+      "max_drawdown": 0.02915945762216343
+    },
+    "promoted": true,
+    "feature_names": [
+      "ret_30",
+      "atr_pct",
+      "hour_cos",
+      "hour_sin",
+      "price_vs_ema_trend",
+      "ret_60",
+      "day_of_week_sin",
+      "trend_slope_pct",
+      "macd_hist",
+      "volume_trend",
+      "rsi_14",
+      "ret_1",
+      "hl_ratio",
+      "ret_5",
+      "volume_ratio",
+      "body_to_range_ratio",
+      "price_vs_ema_fast",
+      "day_of_week_cos",
+      "ret_15",
+      "close_position_in_candle",
+      "ema_full_alignment",
+      "ema_fast_above_slow"
+    ],
+    "n_features": 22
+  }
+]

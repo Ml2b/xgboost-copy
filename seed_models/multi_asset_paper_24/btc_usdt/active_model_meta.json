@@ -1,0 +1,24 @@
+{
+  "model_id": "model_20260318T140744088399Z",
+  "model_path": "models\\multi_asset_paper_24\\btc_usdt\\active_model.json",
+  "feature_names": [
+    "hour_sin",
+    "atr_pct",
+    "day_of_week_sin",
+    "bb_width",
+    "hour_cos",
+    "ret_30",
+    "close_position_in_candle",
+    "position_in_range_20",
+    "volume_ratio",
+    "ret_1",
+    "hl_ratio",
+    "ret_60",
+    "day_of_week_cos",
+    "macd_hist",
+    "volume_trend",
+    "price_vs_ema_fast",
+    "trend_slope_pct",
+    "body_to_range_ratio"
+  ]
+}

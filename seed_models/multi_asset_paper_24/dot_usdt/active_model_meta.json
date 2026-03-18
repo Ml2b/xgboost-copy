@@ -1,0 +1,28 @@
+{
+  "model_id": "model_20260318T023957676530Z",
+  "model_path": "models\\multi_asset_paper_24\\dot_usdt\\model_20260318T023957676530Z.json",
+  "feature_names": [
+    "day_of_week_sin",
+    "macd_hist",
+    "realized_vol_20",
+    "hl_ratio",
+    "rsi_14",
+    "ret_5",
+    "ret_60",
+    "trend_slope_pct",
+    "ret_30",
+    "hour_cos",
+    "volume_trend",
+    "ret_1",
+    "volume_ratio",
+    "hour_sin",
+    "day_of_week_cos",
+    "body_to_range_ratio",
+    "close_position_in_candle",
+    "macd_cross_down",
+    "macd_cross_up",
+    "ema_fast_above_slow",
+    "ema_full_alignment",
+    "volume_spike"
+  ]
+}

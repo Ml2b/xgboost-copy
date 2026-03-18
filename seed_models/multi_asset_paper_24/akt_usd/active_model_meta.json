@@ -1,0 +1,24 @@
+{
+  "model_id": "model_20260318T192841234236Z",
+  "model_path": "models\\multi_asset_paper_24\\akt_usd\\active_model.json",
+  "feature_names": [
+    "atr_pct",
+    "hour_cos",
+    "day_of_week_cos",
+    "position_in_range_20",
+    "bb_width",
+    "hour_sin",
+    "hl_ratio",
+    "price_vs_ema_trend",
+    "volume_trend",
+    "macd_hist",
+    "day_of_week_sin",
+    "ret_60",
+    "trend_slope_pct",
+    "ret_1",
+    "volume_ratio",
+    "ret_5",
+    "ema_full_alignment",
+    "close_position_in_candle"
+  ]
+}

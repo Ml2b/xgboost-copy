@@ -1,0 +1,25 @@
+{
+  "model_id": "model_20260318T023433467572Z",
+  "model_path": "models\\multi_asset_paper_24\\ada_usdt\\active_model.json",
+  "feature_names": [
+    "day_of_week_sin",
+    "ret_60",
+    "hour_cos",
+    "realized_vol_20",
+    "hour_sin",
+    "price_vs_ema_trend",
+    "hl_ratio",
+    "macd_hist",
+    "day_of_week_cos",
+    "ret_5",
+    "ret_1",
+    "volume_trend",
+    "rsi_14",
+    "trend_slope_pct",
+    "volume_ratio",
+    "body_to_range_ratio",
+    "ema_full_alignment",
+    "macd_cross_down",
+    "ema_fast_above_slow"
+  ]
+}

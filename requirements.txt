@@ -1,0 +1,13 @@
+xgboost
+scikit-learn
+shap
+numpy
+pandas
+redis[hiredis]
+websockets
+ccxt
+loguru
+python-dotenv
+pytest
+fakeredis
+coinbase-advanced-py

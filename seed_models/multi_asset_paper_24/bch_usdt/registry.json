@@ -1,0 +1,43 @@
+[
+  {
+    "model_id": "model_20260318T024529170439Z",
+    "model_path": "models\\multi_asset_paper_24\\bch_usdt\\model_20260318T024529170439Z.json",
+    "created_at": "2026-03-18T02:45:29.184439+00:00",
+    "train_start": "2025-09-19T03:56:00+00:00",
+    "train_end": "2026-02-10T00:34:00+00:00",
+    "val_start": "2026-02-10T00:35:00+00:00",
+    "val_end": "2026-03-16T03:35:00+00:00",
+    "metrics": {
+      "auc_val": 0.559451949794002,
+      "sharpe": 2.2486251619599367,
+      "precision_buy": 0.6,
+      "win_rate": 0.6,
+      "max_drawdown": 0.37043870901715326
+    },
+    "promoted": true,
+    "feature_names": [
+      "day_of_week_sin",
+      "realized_vol_20",
+      "ret_30",
+      "hl_ratio",
+      "ret_60",
+      "macd_hist",
+      "position_in_range_20",
+      "ret_1",
+      "trend_slope_pct",
+      "hour_sin",
+      "volume_trend",
+      "volume_ratio",
+      "day_of_week_cos",
+      "hour_cos",
+      "close_position_in_candle",
+      "ema_full_alignment",
+      "body_to_range_ratio",
+      "rsi_divergence",
+      "macd_cross_down",
+      "volume_spike",
+      "macd_cross_up"
+    ],
+    "n_features": 21
+  }
+]
