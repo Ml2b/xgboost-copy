@@ -21,12 +21,16 @@ services:
         value: /opt/render/project/src/runtime/models/multi_asset_paper_24
       - key: TRAINER_HISTORY_DB_PATH
         value: /opt/render/project/src/runtime/trainer_candle_history.sqlite3
+      - key: PYTHONUNBUFFERED
+        value: "1"
       - key: EXECUTION_ENABLED
         value: "true"
       - key: EXECUTION_DRY_RUN
         value: "true"
       - key: PAPER_TRADING_ENABLED
         value: "true"
+      - key: PRODUCTS_CSV
+        value: BTC-USD,ETH-USD,SOL-USD,XRP-USD,ADA-USD,DOGE-USD,AVAX-USD,DOT-USD,LINK-USD,LTC-USD,BCH-USD,UNI-USD,PEPE-USD,BONK-USD,FARTCOIN-USD,TAO-USD,SUI-USD,HBAR-USD,FET-USD,AAVE-USD,XLM-USD,ONDO-USD,AKT-USD,PENGU-USD
       - key: OBSERVED_BASES_CSV
         value: BTC,ETH,SOL,XRP,ADA,DOGE,AVAX,DOT,LINK,LTC,BCH,UNI,PEPE,BONK,FARTCOIN,TAO,SUI,HBAR,FET,AAVE,XLM,ONDO,AKT,PENGU
       - key: EXECUTION_ALLOWED_BASES_CSV

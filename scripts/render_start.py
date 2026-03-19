@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 import os
 import shutil
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -33,15 +32,21 @@ def main() -> None:
 
     history_db_path.parent.mkdir(parents=True, exist_ok=True)
     model_root.parent.mkdir(parents=True, exist_ok=True)
+    print(f"[render_start] model_root={model_root}", flush=True)
+    print(f"[render_start] history_db_path={history_db_path}", flush=True)
     ensure_seed_models(model_root)
-
-    command = [sys.executable, str(ROOT / "main.py")]
-    subprocess.run(command, check=True, cwd=str(ROOT), env=os.environ.copy())
+    print("[render_start] launching main.py", flush=True)
+    os.execvpe(
+        sys.executable,
+        [sys.executable, str(ROOT / "main.py")],
+        os.environ.copy(),
+    )
 
 
 def ensure_seed_models(target_root: Path) -> None:
     """Copia el seed de modelos una sola vez al storage persistente de Render."""
     if target_root.exists() and any(target_root.iterdir()):
+        print("[render_start] seed models already present on disk", flush=True)
         return
     if not SEED_MODEL_ROOT.exists():
         raise FileNotFoundError(f"No existe el seed de modelos: {SEED_MODEL_ROOT}")
@@ -50,15 +55,18 @@ def ensure_seed_models(target_root: Path) -> None:
     lock_fd = acquire_lock()
     try:
         if target_root.exists() and any(target_root.iterdir()):
+            print("[render_start] seed models became available during lock wait", flush=True)
             return
 
         temp_target = target_root.parent / f"{target_root.name}.tmp"
         if temp_target.exists():
             shutil.rmtree(temp_target)
+        print(f"[render_start] copying seed models from {SEED_MODEL_ROOT}", flush=True)
         shutil.copytree(SEED_MODEL_ROOT, temp_target)
         if target_root.exists():
             shutil.rmtree(target_root)
         temp_target.rename(target_root)
+        print("[render_start] seed models copied", flush=True)
     finally:
         release_lock(lock_fd)
 
