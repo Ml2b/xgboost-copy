@@ -34,6 +34,7 @@ class RetrainCycleResult:
     feature_names: list[str] | None = None
     used_continuation: bool = False
     history_rows: int = 0
+    reason: str = ""
 
 
 class Trainer:
@@ -106,12 +107,39 @@ class Trainer:
             model_factory=self._model_factory,
             selector_config=self.selector_config,
         )
-        wf_result = validator.validate(
-            labeled_df,
-            target_col="target",
-            feature_cols=feature_cols,
-            sample_weight=sample_weight,
-        )
+        try:
+            wf_result = validator.validate(
+                labeled_df,
+                target_col="target",
+                feature_cols=feature_cols,
+                sample_weight=sample_weight,
+            )
+        except ValueError as exc:
+            logger.warning(
+                "Trainer ciclo degradado a insufficient_data. registry_dir={} history_rows={} reason={}",
+                self.registry.base_dir,
+                len(labeled_df),
+                exc,
+            )
+            return RetrainCycleResult(
+                status="insufficient_data",
+                history_rows=len(labeled_df),
+                reason=str(exc),
+            )
+        except RuntimeError as exc:
+            if "evaluable" not in str(exc).lower():
+                raise
+            logger.warning(
+                "Trainer ciclo degradado a no_evaluable. registry_dir={} history_rows={} reason={}",
+                self.registry.base_dir,
+                len(labeled_df),
+                exc,
+            )
+            return RetrainCycleResult(
+                status="no_evaluable",
+                history_rows=len(labeled_df),
+                reason=str(exc),
+            )
         stable_features = wf_result.stable_features
         final_model, used_continuation = self._fit_final_model(
             labeled_df,
@@ -388,13 +416,14 @@ class MultiAssetTrainerService:
             if result.promoted:
                 promoted_assets += 1
             logger.info(
-                "Trainer asset finalizado. base_asset={} status={} promoted={} auc={} continuation={} history_rows={} duration_s={}",
+                "Trainer asset finalizado. base_asset={} status={} promoted={} auc={} continuation={} history_rows={} reason={} duration_s={}",
                 artifact.base_asset,
                 result.status,
                 result.promoted,
                 round(result.auc, 4),
                 result.used_continuation,
                 result.history_rows,
+                result.reason,
                 round(time.perf_counter() - asset_started, 2),
             )
         logger.info(

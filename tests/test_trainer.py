@@ -10,6 +10,7 @@ import pandas as pd
 from features.selector import SelectorConfig
 from model.registry import ModelMetrics
 from model.registry import ModelRegistry
+import model.trainer as trainer_module
 from model.trainer import Trainer
 from tests.helpers import make_synthetic_candles
 from validation.walk_forward import WalkForwardConfig
@@ -40,6 +41,55 @@ def test_trainer_cycle_handles_insufficient_data_without_error(tmp_path) -> None
     result = trainer._retrain_cycle()
     assert result.status == "insufficient_data"
     assert result.record is None
+
+
+def test_trainer_cycle_handles_no_evaluable_folds_without_error(tmp_path, monkeypatch) -> None:
+    class _NoEvaluableValidator:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def validate(self, *args, **kwargs):
+            raise RuntimeError("Ningun fold produjo un modelo evaluable.")
+
+    registry = ModelRegistry(base_dir=tmp_path / "models")
+    trainer = Trainer(
+        registry=registry,
+        data_loader=lambda: make_synthetic_candles(1800, seed=37),
+        walk_forward_config=WalkForwardConfig(n_splits=3, min_train_size=600, gap_periods=5, verbose=False),
+        selector_config=SelectorConfig(verbose=False, max_features=10),
+    )
+    monkeypatch.setattr(trainer_module, "WalkForwardValidator", _NoEvaluableValidator)
+
+    result = trainer._retrain_cycle()
+
+    assert result.status == "no_evaluable"
+    assert result.record is None
+    assert "evaluable" in result.reason.lower()
+
+
+def test_trainer_cycle_propagates_unexpected_runtime_error(tmp_path, monkeypatch) -> None:
+    class _UnexpectedFailureValidator:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def validate(self, *args, **kwargs):
+            raise RuntimeError("disk full")
+
+    registry = ModelRegistry(base_dir=tmp_path / "models")
+    trainer = Trainer(
+        registry=registry,
+        data_loader=lambda: make_synthetic_candles(1800, seed=41),
+        walk_forward_config=WalkForwardConfig(n_splits=3, min_train_size=600, gap_periods=5, verbose=False),
+        selector_config=SelectorConfig(verbose=False, max_features=10),
+    )
+    monkeypatch.setattr(trainer_module, "WalkForwardValidator", _UnexpectedFailureValidator)
+
+    try:
+        trainer._retrain_cycle()
+    except RuntimeError as exc:
+        assert "disk full" in str(exc)
+    else:
+        raise AssertionError("El trainer debio propagar un RuntimeError inesperado.")
 
 
 def test_trainer_recency_weights_favor_recent_rows(tmp_path) -> None:
