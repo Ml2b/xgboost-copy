@@ -188,6 +188,9 @@ class DiagnosticsServer:
     def _process_info() -> dict:
         """RAM y env vars de riesgo activos en el proceso."""
         info: dict = {
+            "execution_dry_run": settings.EXECUTION_DRY_RUN,
+            "execution_enabled": settings.EXECUTION_ENABLED,
+            "paper_initial_cash": settings.PAPER_INITIAL_CASH,
             "max_risk_per_trade": settings.MAX_RISK_PER_TRADE,
             "max_spread_pct": settings.MAX_SPREAD_PCT,
             "max_daily_drawdown": settings.MAX_DAILY_DRAWDOWN,
