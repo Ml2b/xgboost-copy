@@ -175,6 +175,7 @@ class DiagnosticsServer:
         return json.dumps({
             "generated_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "window_hours": self._HOURS_BACK,
+            "process": self._process_info(),
             "signals": self._analyse_signals(sig_rows),
             "execution": self._analyse_execution(exe_rows),
             "paper": self._analyse_paper(paper_rows),
@@ -182,6 +183,31 @@ class DiagnosticsServer:
             "history_store": history_stats,
             "retrains_24h": retrain_stats,
         }, indent=2)
+
+    @staticmethod
+    def _process_info() -> dict:
+        """RAM y env vars de riesgo activos en el proceso."""
+        info: dict = {
+            "max_risk_per_trade": settings.MAX_RISK_PER_TRADE,
+            "max_spread_pct": settings.MAX_SPREAD_PCT,
+            "max_daily_drawdown": settings.MAX_DAILY_DRAWDOWN,
+            "pilot_order_notional_usd": settings.PILOT_ORDER_NOTIONAL_USD,
+        }
+        try:
+            mem = Path("/proc/meminfo").read_text()
+            def _kb(label: str) -> int:
+                for line in mem.splitlines():
+                    if line.startswith(label):
+                        return int(line.split()[1])
+                return 0
+            total_mb = round(_kb("MemTotal:") / 1024)
+            avail_mb = round(_kb("MemAvailable:") / 1024)
+            info["ram_total_mb"] = total_mb
+            info["ram_available_mb"] = avail_mb
+            info["ram_used_mb"] = total_mb - avail_mb
+        except Exception:
+            pass
+        return info
 
     def _analyse_candles_redis(self, min_id: str) -> dict:
         """Cuenta velas en el stream de Redis para la ventana activa."""

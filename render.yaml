@@ -4,7 +4,7 @@ services:
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: python scripts/render_start.py
-    plan: starter
+    plan: standard
     healthCheckPath: /health
     disk:
       name: runtime-storage
