@@ -52,6 +52,8 @@ services:
         value: "0.01"
       - key: MAX_DAILY_DRAWDOWN
         value: "0.05"
+      - key: PILOT_ORDER_NOTIONAL_USD
+        value: "50"
 
   - type: keyvalue
     name: xgboost-redis
