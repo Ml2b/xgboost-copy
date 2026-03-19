@@ -1,10 +1,11 @@
 services:
-  - type: worker
+  - type: web
     name: xgboost-trader
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: python scripts/render_start.py
     plan: starter
+    healthCheckPath: /health
     disk:
       name: runtime-storage
       mountPath: /opt/render/project/src/runtime

@@ -9,7 +9,7 @@ import os
 import signal
 import sys
 import time
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from typing import Any
 
 import pandas as pd
@@ -105,6 +105,183 @@ class FeatureEngine:
                 raise
 
 
+class DiagnosticsServer:
+    """Servidor HTTP minimalista que expone /status con métricas del bot en tiempo real."""
+
+    _HOURS_BACK = 4.0
+    _MAX_ROWS = 20_000
+
+    def __init__(self, redis_client: Any, port: int = 10_000) -> None:
+        self.redis_client = redis_client
+        self.port = port
+
+    async def start(self, stop_event: asyncio.Event | None = None) -> None:
+        stop_event = stop_event or asyncio.Event()
+        server = await asyncio.start_server(self._handle, "0.0.0.0", self.port)
+        logger.info("DiagnosticsServer escuchando en puerto {}", self.port)
+        async with server:
+            await stop_event.wait()
+
+    async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            raw = await asyncio.wait_for(reader.readline(), timeout=5.0)
+            request_line = raw.decode(errors="replace").strip()
+            # Consumir headers (ignorar)
+            while True:
+                line = await asyncio.wait_for(reader.readline(), timeout=5.0)
+                if line in (b"\r\n", b"\n", b""):
+                    break
+        except Exception:
+            writer.close()
+            return
+
+        path = request_line.split(" ")[1] if " " in request_line else "/"
+        if path in ("/", "/status", "/health"):
+            body = await self._build_status_json()
+            content_type = "application/json"
+            status_line = "200 OK"
+        else:
+            body = json.dumps({"error": "not found"})
+            content_type = "application/json"
+            status_line = "404 Not Found"
+
+        body_bytes = body.encode()
+        response = (
+            f"HTTP/1.1 {status_line}\r\n"
+            f"Content-Type: {content_type}; charset=utf-8\r\n"
+            f"Content-Length: {len(body_bytes)}\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+        ).encode() + body_bytes
+        try:
+            writer.write(response)
+            await writer.drain()
+        finally:
+            writer.close()
+
+    async def _build_status_json(self) -> str:
+        cutoff_ms = int((time.time() - self._HOURS_BACK * 3600) * 1000)
+        min_id = f"{cutoff_ms}-0"
+
+        sig_rows = await self._xrange(settings.STREAM_INFERENCE_SIGNALS, min_id)
+        exe_rows = await self._xrange(settings.STREAM_EXECUTION_EVENTS, min_id)
+        paper_rows = await self._xrange(settings.STREAM_PAPER_EXECUTION_EVENTS, min_id)
+
+        return json.dumps({
+            "generated_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "window_hours": self._HOURS_BACK,
+            "signals": self._analyse_signals(sig_rows),
+            "execution": self._analyse_execution(exe_rows),
+            "paper": self._analyse_paper(paper_rows),
+        }, indent=2)
+
+    async def _xrange(self, stream: str, min_id: str) -> list[dict]:
+        try:
+            results = await self.redis_client.xrange(stream, min=min_id, count=self._MAX_ROWS)
+            return [payload for _msg_id, payload in results]
+        except Exception as exc:
+            logger.warning("DiagnosticsServer no pudo leer {}: {}", stream, exc)
+            return []
+
+    @staticmethod
+    def _analyse_signals(rows: list[dict]) -> dict:
+        total = len(rows)
+        by_signal: Counter = Counter()
+        by_asset: Counter = Counter()
+        actionable = 0
+        non_actionable_reasons: Counter = Counter()
+        probs: list[float] = []
+        for row in rows:
+            sig = row.get("signal", "?").upper()
+            by_signal[sig] += 1
+            by_asset[row.get("product_id", "?")] += 1
+            act = str(row.get("actionable", "false")).lower() == "true"
+            if act:
+                actionable += 1
+            else:
+                reason = row.get("reason") or "—"
+                non_actionable_reasons[reason] += 1
+            with contextlib.suppress(Exception):
+                probs.append(float(row["prob_buy"]))
+        return {
+            "total": total,
+            "actionable": actionable,
+            "avg_prob_buy": round(sum(probs) / len(probs), 4) if probs else None,
+            "by_signal": dict(by_signal.most_common()),
+            "top_assets": dict(by_asset.most_common(10)),
+            "non_actionable_reasons": dict(non_actionable_reasons.most_common(5)),
+        }
+
+    @staticmethod
+    def _analyse_execution(rows: list[dict]) -> dict:
+        by_decision: Counter = Counter()
+        dry_runs = 0
+        live_orders = 0
+        for row in rows:
+            decision = row.get("decision", "?")
+            by_decision[decision] += 1
+            if decision == "accepted_dry_run":
+                dry_runs += 1
+            elif decision == "sent_live":
+                live_orders += 1
+        return {
+            "total": len(rows),
+            "dry_runs": dry_runs,
+            "live_orders": live_orders,
+            "by_decision": dict(by_decision.most_common()),
+        }
+
+    @staticmethod
+    def _analyse_paper(rows: list[dict]) -> dict:
+        buy_fills = 0
+        sell_fills = 0
+        realized_pnl = 0.0
+        last_equity: float | None = None
+        last_cash: float | None = None
+        last_drawdown: float | None = None
+        fills_by_asset: Counter = Counter()
+        pnl_by_asset: dict[str, float] = defaultdict(float)
+        holding_ms_list: list[float] = []
+        by_decision: Counter = Counter()
+        for row in rows:
+            decision = row.get("decision", "?")
+            by_decision[decision] += 1
+            asset = row.get("product_id", "?")
+            if decision == "paper_buy_filled":
+                buy_fills += 1
+                fills_by_asset[asset] += 1
+                with contextlib.suppress(Exception):
+                    last_equity = float(row["equity"])
+                    last_cash = float(row["cash"])
+                    last_drawdown = float(row["drawdown_pct"])
+            elif decision == "paper_sell_filled":
+                sell_fills += 1
+                fills_by_asset[asset] += 1
+                with contextlib.suppress(Exception):
+                    pnl = float(row.get("realized_pnl", 0))
+                    realized_pnl += pnl
+                    pnl_by_asset[asset] += pnl  # type: ignore[index]
+                with contextlib.suppress(Exception):
+                    last_equity = float(row["equity"])
+                    last_cash = float(row["cash"])
+                    last_drawdown = float(row["drawdown_pct"])
+                with contextlib.suppress(Exception):
+                    holding_ms_list.append(float(row["holding_ms"]))
+        return {
+            "total": len(rows),
+            "buy_fills": buy_fills,
+            "sell_fills": sell_fills,
+            "realized_pnl_usd": round(realized_pnl, 4),
+            "last_equity_usd": round(last_equity, 4) if last_equity is not None else None,
+            "last_cash_usd": round(last_cash, 4) if last_cash is not None else None,
+            "last_drawdown_pct": round(last_drawdown * 100, 4) if last_drawdown is not None else None,
+            "avg_holding_min": round(sum(holding_ms_list) / len(holding_ms_list) / 60_000, 2) if holding_ms_list else None,
+            "fills_by_asset": dict(fills_by_asset.most_common()),
+            "pnl_by_asset_usd": {k: round(v, 4) for k, v in sorted(pnl_by_asset.items(), key=lambda x: -abs(x[1]))},
+            "by_decision": dict(by_decision.most_common()),
+        }
+
+
 async def run_service(name: str, factory, stop_event: asyncio.Event) -> None:
     """Mantiene vivo un servicio aunque falle y lo reinicia."""
     logger.info("Servicio {} lanzado", name)
@@ -187,14 +364,17 @@ async def async_main() -> None:
         order_notional_usd=settings.PILOT_ORDER_NOTIONAL_USD,
     )
     paper_trader = PaperTrader(redis_client=redis_client_async)
+    diagnostics_port = int(os.getenv("PORT", "10000"))
+    diagnostics = DiagnosticsServer(redis_client=redis_client_async, port=diagnostics_port)
 
-    service_names = ["collector", "feature_engine", "inference", "trainer", "order_manager"]
+    service_names = ["collector", "feature_engine", "inference", "trainer", "order_manager", "diagnostics"]
     services = [
         asyncio.create_task(run_service("collector", lambda: collector.start(stop_event), stop_event)),
         asyncio.create_task(run_service("feature_engine", lambda: feature_engine.start(stop_event), stop_event)),
         asyncio.create_task(run_service("inference", lambda: inference.start(stop_event), stop_event)),
         asyncio.create_task(run_service("trainer", lambda: trainer.start(stop_event), stop_event)),
         asyncio.create_task(run_service("order_manager", lambda: order_manager.start(stop_event), stop_event)),
+        asyncio.create_task(run_service("diagnostics", lambda: diagnostics.start(stop_event), stop_event)),
     ]
     if settings.PAPER_TRADING_ENABLED:
         services.append(
