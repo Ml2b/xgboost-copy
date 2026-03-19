@@ -215,6 +215,7 @@ class DiagnosticsServer:
     @staticmethod
     def _analyse_execution(rows: list[dict]) -> dict:
         by_decision: Counter = Counter()
+        by_reason: Counter = Counter()
         dry_runs = 0
         live_orders = 0
         for row in rows:
@@ -224,11 +225,15 @@ class DiagnosticsServer:
                 dry_runs += 1
             elif decision == "sent_live":
                 live_orders += 1
+            reason = row.get("reason", "")
+            if reason:
+                by_reason[reason] += 1
         return {
             "total": len(rows),
             "dry_runs": dry_runs,
             "live_orders": live_orders,
             "by_decision": dict(by_decision.most_common()),
+            "block_reasons": dict(by_reason.most_common(10)),
         }
 
     @staticmethod
