@@ -242,7 +242,7 @@ class OrderManager:
     ) -> dict[str, Any]:
         quote_balance = balances.get(quote_asset.upper(), Decimal("0"))
         base_balance = balances.get(base_asset.upper(), Decimal("0"))
-        if not self.dry_run and base_balance >= base_min_size:
+        if base_balance >= base_min_size:
             self.stats.rejected += 1
             return self._base_event(
                 product_id=product_id,
@@ -343,7 +343,7 @@ class OrderManager:
         latency_started: float,
     ) -> dict[str, Any]:
         available_base = balances.get(base_asset.upper(), Decimal("0"))
-        if not self.dry_run and available_base < base_min_size:
+        if available_base < base_min_size:
             self.stats.rejected += 1
             return self._base_event(
                 product_id=product_id,
@@ -484,6 +484,8 @@ class OrderManager:
         )
 
     def _risk_pct(self, capital_total: float) -> float:
+        if self.dry_run:
+            return 0.0
         if capital_total <= 0:
             return 1.0
         return float(self.order_notional_usd / capital_total)
