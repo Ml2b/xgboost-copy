@@ -520,7 +520,10 @@ async def async_main() -> None:
         for task in services:
             task.cancel()
         await asyncio.gather(*services, return_exceptions=True)
-        await redis_client_async.close()
+        if hasattr(redis_client_async, "aclose"):
+            await redis_client_async.aclose()
+        else:
+            await redis_client_async.close()
         redis_client_sync.close()
 
 
