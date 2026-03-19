@@ -242,7 +242,7 @@ class OrderManager:
     ) -> dict[str, Any]:
         quote_balance = balances.get(quote_asset.upper(), Decimal("0"))
         base_balance = balances.get(base_asset.upper(), Decimal("0"))
-        if base_balance >= base_min_size:
+        if not self.dry_run and base_balance >= base_min_size:
             self.stats.rejected += 1
             return self._base_event(
                 product_id=product_id,
@@ -257,7 +257,7 @@ class OrderManager:
                 latency_ms=self._elapsed_ms(latency_started),
             )
 
-        if quote_balance < Decimal(str(self.order_notional_usd)):
+        if not self.dry_run and quote_balance < Decimal(str(self.order_notional_usd)):
             self.stats.rejected += 1
             return self._base_event(
                 product_id=product_id,
@@ -343,7 +343,7 @@ class OrderManager:
         latency_started: float,
     ) -> dict[str, Any]:
         available_base = balances.get(base_asset.upper(), Decimal("0"))
-        if available_base < base_min_size:
+        if not self.dry_run and available_base < base_min_size:
             self.stats.rejected += 1
             return self._base_event(
                 product_id=product_id,
@@ -461,11 +461,16 @@ class OrderManager:
         return event
 
     def _build_portfolio(self, quote_asset: str, balances: dict[str, Decimal]) -> Portfolio:
-        capital_total = sum(
-            float(balances.get(currency, Decimal("0")))
-            for currency in ("USD", "USDC", "USDT")
-        )
-        capital_total = max(capital_total, self.order_notional_usd)
+        if self.dry_run:
+            capital_total = settings.PAPER_INITIAL_CASH
+            capital_disponible = capital_total
+        else:
+            capital_total = sum(
+                float(balances.get(currency, Decimal("0")))
+                for currency in ("USD", "USDC", "USDT")
+            )
+            capital_total = max(capital_total, self.order_notional_usd)
+            capital_disponible = float(balances.get(quote_asset.upper(), Decimal("0")))
         posiciones_abiertas = sum(
             1
             for base_asset, balance in balances.items()
@@ -473,7 +478,7 @@ class OrderManager:
         )
         return Portfolio(
             capital_total=capital_total,
-            capital_disponible=float(balances.get(quote_asset.upper(), Decimal("0"))),
+            capital_disponible=capital_disponible,
             drawdown_hoy=self.drawdown_today,
             posiciones_abiertas=posiciones_abiertas,
         )

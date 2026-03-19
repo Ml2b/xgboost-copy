@@ -364,7 +364,12 @@ class MultiAssetTrainerService:
         self.registry_root = Path(registry_root)
         self.redis_client = redis_client
         self.retrain_interval = retrain_interval
-        self.walk_forward_config = walk_forward_config or WalkForwardConfig(verbose=False)
+        self.walk_forward_config = walk_forward_config or WalkForwardConfig(
+            n_splits=3,
+            gap_periods=10,
+            min_train_size=500,
+            verbose=False,
+        )
         self.selector_config = selector_config or SelectorConfig(verbose=False)
         self.multi_registry = MultiAssetModelRegistry(root_dir=self.registry_root)
         self.history_store = history_store or CandleHistoryStore()
