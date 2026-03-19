@@ -160,9 +160,9 @@ COINBASE_QUOTE_PRIORITY: Final[list[str]] = [
 ]
 
 # Riesgo
-MAX_RISK_PER_TRADE: Final[float] = 0.01
-MAX_DAILY_DRAWDOWN: Final[float] = 0.02
-MAX_SPREAD_PCT: Final[float] = 0.0025
+MAX_RISK_PER_TRADE: Final[float] = float(os.getenv("MAX_RISK_PER_TRADE", "0.01"))
+MAX_DAILY_DRAWDOWN: Final[float] = float(os.getenv("MAX_DAILY_DRAWDOWN", "0.02"))
+MAX_SPREAD_PCT: Final[float] = float(os.getenv("MAX_SPREAD_PCT", "0.0025"))
 
 # XGBoost
 XGB_PARAMS: Final[dict[str, object]] = {

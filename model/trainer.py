@@ -359,6 +359,7 @@ class MultiAssetTrainerService:
         walk_forward_config: WalkForwardConfig | None = None,
         selector_config: SelectorConfig | None = None,
         history_store: CandleHistoryStore | None = None,
+        observed_bases: list[str] | None = None,
     ) -> None:
         self.registry_root = Path(registry_root)
         self.redis_client = redis_client
@@ -367,6 +368,11 @@ class MultiAssetTrainerService:
         self.selector_config = selector_config or SelectorConfig(verbose=False)
         self.multi_registry = MultiAssetModelRegistry(root_dir=self.registry_root)
         self.history_store = history_store or CandleHistoryStore()
+        self.observed_bases: list[str] = [
+            b.strip().upper()
+            for b in (observed_bases or settings.OBSERVED_BASES)
+            if b.strip()
+        ]
 
     async def start(self, stop_event: asyncio.Event | None = None) -> None:
         """Loop asyncrono que recorre los assets y dispara su trainer dedicado."""
@@ -445,7 +451,36 @@ class MultiAssetTrainerService:
         logger.info("Trainer sync history completado. inserted_rows={}", synced_rows)
 
     def _iter_registry_artifacts(self):
+        """Itera todos los assets: los que ya tienen registry + los observados nuevos."""
+        from model.registry import ResolvedModelArtifact
+
+        seen_bases: set[str] = set()
+
+        # Assets con registry existente
         for registry_key in self.multi_registry.get_registry_keys():
-            artifact = self.multi_registry.resolve_artifact(registry_key.replace("_", "-").upper())
+            artifact = self.multi_registry.resolve_artifact(
+                registry_key.replace("_", "-").upper()
+            )
             if artifact is not None:
+                seen_bases.add(artifact.base_asset.upper())
                 yield artifact
+
+        # Assets observados sin registry aun — crear directorio y arrancar desde cero
+        for base in self.observed_bases:
+            base_upper = base.strip().upper()
+            if not base_upper or base_upper in seen_bases:
+                continue
+            registry_key = f"{base_upper.lower()}_usd"
+            asset_dir = self.registry_root / registry_key
+            asset_dir.mkdir(parents=True, exist_ok=True)
+            seen_bases.add(base_upper)
+            yield ResolvedModelArtifact(
+                registry_key=registry_key,
+                base_asset=base_upper,
+                model_id="",
+                model_path=None,
+                feature_names=[],
+                actionable=False,
+                reason="new_asset",
+                fingerprint=f"new:{base_upper}",
+            )

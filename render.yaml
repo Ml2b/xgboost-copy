@@ -46,6 +46,12 @@ services:
         value: BTC,ETH,SOL,XRP,ADA,DOGE,AVAX,DOT,LINK,LTC,BCH,UNI,PEPE,BONK,FARTCOIN,TAO,SUI,HBAR,FET,AAVE,XLM,ONDO,AKT,PENGU
       - key: PAPER_INITIAL_CASH
         value: "10000"
+      - key: MAX_RISK_PER_TRADE
+        value: "0.25"
+      - key: MAX_SPREAD_PCT
+        value: "0.01"
+      - key: MAX_DAILY_DRAWDOWN
+        value: "0.05"
 
   - type: keyvalue
     name: xgboost-redis
