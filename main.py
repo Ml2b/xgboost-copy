@@ -10,6 +10,7 @@ import signal
 import sys
 import time
 from collections import Counter, defaultdict, deque
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -162,10 +163,14 @@ class DiagnosticsServer:
     async def _build_status_json(self) -> str:
         cutoff_ms = int((time.time() - self._HOURS_BACK * 3600) * 1000)
         min_id = f"{cutoff_ms}-0"
+        since_24h = time.time() - 86400
 
         sig_rows = await self._xrange(settings.STREAM_INFERENCE_SIGNALS, min_id)
         exe_rows = await self._xrange(settings.STREAM_EXECUTION_EVENTS, min_id)
         paper_rows = await self._xrange(settings.STREAM_PAPER_EXECUTION_EVENTS, min_id)
+        candle_stats = await asyncio.to_thread(self._analyse_candles_redis, min_id)
+        history_stats = await asyncio.to_thread(self._analyse_history_store)
+        retrain_stats = await asyncio.to_thread(self._analyse_retrains, since_24h)
 
         return json.dumps({
             "generated_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -173,7 +178,98 @@ class DiagnosticsServer:
             "signals": self._analyse_signals(sig_rows),
             "execution": self._analyse_execution(exe_rows),
             "paper": self._analyse_paper(paper_rows),
+            "candles_stream": candle_stats,
+            "history_store": history_stats,
+            "retrains_24h": retrain_stats,
         }, indent=2)
+
+    def _analyse_candles_redis(self, min_id: str) -> dict:
+        """Cuenta velas en el stream de Redis para la ventana activa."""
+        try:
+            import redis as redis_sync
+            if settings.REDIS_URL:
+                r = redis_sync.from_url(settings.REDIS_URL, decode_responses=True, socket_connect_timeout=5)
+            else:
+                r = redis_sync.Redis(
+                    host=settings.REDIS_HOST, port=settings.REDIS_PORT,
+                    decode_responses=True, socket_connect_timeout=5,
+                )
+            entries = r.xrange(settings.STREAM_MARKET_CANDLES_1M, min=min_id, count=self._MAX_ROWS)
+            by_asset: Counter = Counter()
+            for _msg_id, payload in entries:
+                by_asset[payload.get("product_id", "?")] += 1
+            return {
+                "total": len(entries),
+                "by_asset": dict(by_asset.most_common()),
+            }
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    def _analyse_history_store(self) -> dict:
+        """Lee el SQLite del trainer y reporta filas por activo."""
+        import sqlite3
+        db_path = Path(settings.TRAINER_HISTORY_DB_PATH)
+        if not db_path.exists():
+            return {"error": f"db not found: {db_path}"}
+        try:
+            with sqlite3.connect(db_path) as conn:
+                rows = conn.execute(
+                    "SELECT base_asset, COUNT(*) as n, "
+                    "MAX(open_time) as latest_ms "
+                    "FROM candles GROUP BY base_asset ORDER BY n DESC"
+                ).fetchall()
+                total = sum(r[1] for r in rows)
+                now_ms = int(time.time() * 1000)
+                by_asset = {
+                    r[0]: {
+                        "rows": r[1],
+                        "latest_ago_min": round((now_ms - r[2]) / 60000, 1) if r[2] else None,
+                    }
+                    for r in rows
+                }
+            return {"total_rows": total, "assets": by_asset}
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    @staticmethod
+    def _analyse_retrains(since_ts: float) -> dict:
+        """Escanea los registry.json del model registry para contar retrains desde ayer."""
+        import json as _json
+        registry_root = Path(settings.MODEL_REGISTRY_ROOT)
+        if not registry_root.exists():
+            return {"error": f"registry not found: {registry_root}"}
+        since_iso = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(since_ts))
+        total_trained = 0
+        total_promoted = 0
+        by_asset: dict[str, dict] = {}
+        try:
+            for asset_dir in sorted(registry_root.iterdir()):
+                if not asset_dir.is_dir():
+                    continue
+                registry_path = asset_dir / "registry.json"
+                if not registry_path.exists():
+                    continue
+                records = _json.loads(registry_path.read_text(encoding="utf-8"))
+                recent = [r for r in records if r.get("created_at", "") >= since_iso]
+                promoted = [r for r in recent if r.get("promoted")]
+                total_trained += len(recent)
+                total_promoted += len(promoted)
+                if recent:
+                    last = recent[-1]
+                    by_asset[asset_dir.name] = {
+                        "trained": len(recent),
+                        "promoted": len(promoted),
+                        "last_auc": round(last.get("metrics", {}).get("auc_val", 0), 4),
+                        "last_trained_at": last.get("created_at", "")[:19],
+                    }
+            return {
+                "since_utc": since_iso,
+                "total_retrain_cycles": total_trained,
+                "total_promoted": total_promoted,
+                "by_asset": by_asset,
+            }
+        except Exception as exc:
+            return {"error": str(exc)}
 
     async def _xrange(self, stream: str, min_id: str) -> list[dict]:
         try:
