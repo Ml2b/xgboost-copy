@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from urllib.parse import unquote, urlparse
 from typing import Final
 
 
@@ -21,8 +22,34 @@ def _merge_unique_bases(*groups: list[str]) -> list[str]:
 
 
 # Redis
-REDIS_HOST: Final[str] = os.getenv("REDIS_HOST", "127.0.0.1")
-REDIS_PORT: Final[int] = int(os.getenv("REDIS_PORT", "6379"))
+_redis_url = os.getenv("REDIS_URL", "").strip()
+_parsed_redis_url = urlparse(_redis_url) if _redis_url else None
+REDIS_URL: Final[str] = _redis_url
+REDIS_HOST: Final[str] = (
+    _parsed_redis_url.hostname
+    if _parsed_redis_url and _parsed_redis_url.hostname
+    else os.getenv("REDIS_HOST", "127.0.0.1")
+)
+REDIS_PORT: Final[int] = (
+    _parsed_redis_url.port
+    if _parsed_redis_url and _parsed_redis_url.port
+    else int(os.getenv("REDIS_PORT", "6379"))
+)
+REDIS_USERNAME: Final[str | None] = (
+    unquote(_parsed_redis_url.username)
+    if _parsed_redis_url and _parsed_redis_url.username
+    else (os.getenv("REDIS_USERNAME") or None)
+)
+REDIS_PASSWORD: Final[str | None] = (
+    unquote(_parsed_redis_url.password)
+    if _parsed_redis_url and _parsed_redis_url.password
+    else (os.getenv("REDIS_PASSWORD") or None)
+)
+REDIS_DB: Final[int] = (
+    int(_parsed_redis_url.path.lstrip("/"))
+    if _parsed_redis_url and _parsed_redis_url.path and _parsed_redis_url.path.lstrip("/")
+    else int(os.getenv("REDIS_DB", "0"))
+)
 STREAM_MARKET_TRADES_RAW: Final[str] = "market.trades.raw"
 STREAM_MARKET_CANDLES_1M: Final[str] = "market.candles.1m"
 STREAM_MARKET_FEATURES: Final[str] = "market.features"

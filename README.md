@@ -73,6 +73,7 @@ Ese bootstrap:
 - copia el seed de modelos desde `seed_models/multi_asset_paper_24` al storage persistente si el disco esta vacio;
 - usa `runtime/` para el registry efectivo y para el SQLite historico del trainer;
 - luego arranca `main.py`.
+- soporta Redis tanto por `REDIS_HOST`/`REDIS_PORT` como por `REDIS_URL`.
 
 Tests:
 

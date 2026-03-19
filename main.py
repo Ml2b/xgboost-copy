@@ -109,16 +109,8 @@ async def async_main() -> None:
         settings.EXECUTION_DRY_RUN,
     )
 
-    redis_client_async = redis_async.Redis(
-        host=settings.REDIS_HOST,
-        port=settings.REDIS_PORT,
-        decode_responses=True,
-    )
-    redis_client_sync = redis_sync.Redis(
-        host=settings.REDIS_HOST,
-        port=settings.REDIS_PORT,
-        decode_responses=True,
-    )
+    redis_client_async = _build_async_redis_client(redis_async)
+    redis_client_sync = _build_sync_redis_client(redis_sync)
 
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -212,6 +204,40 @@ async def _resolve_observed_products(
 def main() -> None:
     """Entry point del orquestador."""
     asyncio.run(async_main())
+
+
+def _build_async_redis_client(redis_async_module: Any) -> Any:
+    """Construye el cliente async soportando REDIS_URL o host/port clasicos."""
+    if settings.REDIS_URL:
+        return redis_async_module.from_url(
+            settings.REDIS_URL,
+            decode_responses=True,
+        )
+    return redis_async_module.Redis(
+        host=settings.REDIS_HOST,
+        port=settings.REDIS_PORT,
+        username=settings.REDIS_USERNAME,
+        password=settings.REDIS_PASSWORD,
+        db=settings.REDIS_DB,
+        decode_responses=True,
+    )
+
+
+def _build_sync_redis_client(redis_sync_module: Any) -> Any:
+    """Construye el cliente sync soportando REDIS_URL o host/port clasicos."""
+    if settings.REDIS_URL:
+        return redis_sync_module.from_url(
+            settings.REDIS_URL,
+            decode_responses=True,
+        )
+    return redis_sync_module.Redis(
+        host=settings.REDIS_HOST,
+        port=settings.REDIS_PORT,
+        username=settings.REDIS_USERNAME,
+        password=settings.REDIS_PASSWORD,
+        db=settings.REDIS_DB,
+        decode_responses=True,
+    )
 
 
 if __name__ == "__main__":

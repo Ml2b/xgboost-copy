@@ -10,16 +10,11 @@ services:
       mountPath: /opt/render/project/src/runtime
       sizeGB: 5
     envVars:
-      - key: REDIS_HOST
+      - key: REDIS_URL
         fromService:
           name: xgboost-redis
-          type: redis
-          property: host
-      - key: REDIS_PORT
-        fromService:
-          name: xgboost-redis
-          type: redis
-          property: port
+          type: keyvalue
+          property: connectionString
       - key: COINBASE_CREDENTIALS_PATH
         value: /etc/secrets/coinbase_api_key.json
       - key: MODEL_REGISTRY_ROOT
@@ -39,7 +34,8 @@ services:
       - key: PAPER_INITIAL_CASH
         value: "10000"
 
-  - type: redis
+  - type: keyvalue
     name: xgboost-redis
     plan: starter
     maxmemoryPolicy: noeviction
+    ipAllowList: []
