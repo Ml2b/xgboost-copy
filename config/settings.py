@@ -210,6 +210,7 @@ TRAINER_RECENCY_WEIGHT_HALF_LIFE_CANDLES: Final[int] = int(
 FEATURE_BUFFER_SIZE: Final[int] = 100
 WS_TIMEOUT_SECONDS: Final[int] = 30
 HEALTH_PUBLISH_INTERVAL: Final[int] = 10
+RUNTIME_LOG_INTERVAL_SECONDS: Final[int] = int(os.getenv("RUNTIME_LOG_INTERVAL_SECONDS", "60"))
 COINBASE_HTTP_TIMEOUT_SECONDS: Final[int] = int(os.getenv("COINBASE_HTTP_TIMEOUT_SECONDS", "10"))
 COINBASE_WS_PUBLIC_URL: Final[str] = "wss://advanced-trade-ws.coinbase.com"
 COINBASE_CHANNEL: Final[str] = "market_trades"

@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
+from loguru import logger
+
 from config import settings
 from exchange.coinbase_client import CoinbaseAdvancedTradeClient
 from risk.guardian import Portfolio, RiskGuardian
@@ -55,10 +57,17 @@ class OrderManager:
         self.stats = ExecutionStats()
         self._cooldown_until_by_asset: dict[str, float] = {}
         self._asset_locks: dict[str, asyncio.Lock] = {}
+        self._last_runtime_log_at = 0.0
 
     async def start(self, stop_event: asyncio.Event | None = None) -> None:
         """Consume inference.signals y publica execution.events."""
         stop_event = stop_event or asyncio.Event()
+        logger.info(
+            "OrderManager iniciado. execution_enabled={} dry_run={} allowed_bases={}",
+            self.execution_enabled,
+            self.dry_run,
+            sorted(self.allowed_bases),
+        )
         await self._ensure_group(settings.STREAM_INFERENCE_SIGNALS, "order-manager")
         while not stop_event.is_set():
             messages = await self.redis_client.xreadgroup(
@@ -73,6 +82,7 @@ class OrderManager:
                     event = await self.handle_signal(payload)
                     await self._publish_event(event)
                     await self.redis_client.xack(settings.STREAM_INFERENCE_SIGNALS, "order-manager", message_id)
+                    self._log_runtime_summary()
 
     async def handle_signal(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Evalua una senal y retorna el evento de ejecucion resultante."""
@@ -265,6 +275,12 @@ class OrderManager:
         if self.dry_run or not self.execution_enabled:
             self.stats.dry_runs += 1
             self._mark_cooldown(product_id)
+            logger.info(
+                "OrderManager dry-run BUY aceptado. product_id={} notional_usd={} model_id={}",
+                product_id,
+                self.order_notional_usd,
+                model_id,
+            )
             return self._base_event(
                 product_id=product_id,
                 signal="BUY",
@@ -281,6 +297,12 @@ class OrderManager:
         try:
             response = self.coinbase_client.place_market_buy_quote(product_id, self.order_notional_usd)
             self.stats.live_orders += 1
+            logger.info(
+                "OrderManager envio BUY live. product_id={} notional_usd={} model_id={}",
+                product_id,
+                self.order_notional_usd,
+                model_id,
+            )
             event = await self._live_order_event(
                 product_id=product_id,
                 signal="BUY",
@@ -339,6 +361,12 @@ class OrderManager:
         if self.dry_run or not self.execution_enabled:
             self.stats.dry_runs += 1
             self._mark_cooldown(product_id)
+            logger.info(
+                "OrderManager dry-run SELL aceptado. product_id={} base_size={} model_id={}",
+                product_id,
+                float(available_base),
+                model_id,
+            )
             return self._base_event(
                 product_id=product_id,
                 signal="SELL",
@@ -355,6 +383,12 @@ class OrderManager:
         try:
             response = self.coinbase_client.place_market_sell_base(product_id, available_base)
             self.stats.live_orders += 1
+            logger.info(
+                "OrderManager envio SELL live. product_id={} base_size={} model_id={}",
+                product_id,
+                float(available_base),
+                model_id,
+            )
             event = await self._live_order_event(
                 product_id=product_id,
                 signal="SELL",
@@ -454,6 +488,21 @@ class OrderManager:
 
     def _mark_cooldown(self, product_id: str) -> None:
         self._cooldown_until_by_asset[product_id] = time.time() + self.cooldown_seconds
+
+    def _log_runtime_summary(self) -> None:
+        """Resume el estado del ejecutor para inspeccion remota."""
+        now = time.time()
+        if now - self._last_runtime_log_at < settings.RUNTIME_LOG_INTERVAL_SECONDS:
+            return
+        self._last_runtime_log_at = now
+        logger.info(
+            "OrderManager resumen: processed={} dry_runs={} live_orders={} rejected={} cooldown_assets={}",
+            self.stats.processed,
+            self.stats.dry_runs,
+            self.stats.live_orders,
+            self.stats.rejected,
+            len(self._cooldown_until_by_asset),
+        )
 
     async def _publish_event(self, payload: dict[str, Any]) -> None:
         mapping = {

@@ -5,11 +5,14 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import time
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from itertools import islice
 from typing import Any
+
+from loguru import logger
 
 from config import settings
 from data.candle_builder import CandleBuilder
@@ -73,10 +76,18 @@ class CollectorWithCandles:
         }
         self._last_published_candle_open_by_product: dict[str, int] = {}
         self._last_reconcile_started_at_by_product: dict[str, float] = {}
+        self._last_runtime_log_at = 0.0
 
     async def start(self, stop_event: asyncio.Event | None = None) -> None:
         """Arranca una o varias conexiones con reconexion exponencial."""
         stop_event = stop_event or asyncio.Event()
+        logger.info(
+            "Collector iniciado. products={} ws_auth={} reconcile={} batches={}",
+            len(self.products),
+            self._should_auth_ws(),
+            self.enable_candle_reconcile,
+            len(self._build_product_batches()),
+        )
         health_task = asyncio.create_task(self._health_loop(stop_event))
         socket_tasks = [
             asyncio.create_task(self._run_socket_loop(batch, stop_event))
@@ -103,6 +114,7 @@ class CollectorWithCandles:
         backoff = 2
         attempts = 0
         connection_key = self._connection_key(products)
+        logger.info("Collector socket loop iniciado. connection_key={}", connection_key)
         while not stop_event.is_set():
             try:
                 await self._run_socket(products, stop_event)
@@ -112,6 +124,12 @@ class CollectorWithCandles:
                 raise
             except Exception as exc:
                 attempts += 1
+                logger.warning(
+                    "Collector websocket reconectando. connection_key={} attempt={} error={}",
+                    connection_key,
+                    attempts,
+                    exc,
+                )
                 await self._publish_error(
                     "collector.websocket",
                     {
@@ -135,6 +153,12 @@ class CollectorWithCandles:
 
         connection_key = self._connection_key(products)
         async with websockets.connect(self.websocket_url, ping_interval=20, ping_timeout=20) as websocket:
+            logger.info(
+                "Collector websocket conectado. connection_key={} products={} auth={}",
+                connection_key,
+                products,
+                self._should_auth_ws(),
+            )
             await websocket.send(json.dumps(self._build_subscription_message(settings.COINBASE_CHANNEL, products)))
             await websocket.send(json.dumps(self._build_subscription_message(settings.COINBASE_HEARTBEATS_CHANNEL)))
 
@@ -233,6 +257,13 @@ class CollectorWithCandles:
         current = counters[-1]
         last = self._last_heartbeat_counter_by_connection.get(connection_key)
         if last is not None and current > last + 1:
+            logger.warning(
+                "Collector heartbeat gap detectado. connection_key={} last={} current={} missed={}",
+                connection_key,
+                last,
+                current,
+                current - last - 1,
+            )
             await self._publish_error(
                 "collector.heartbeat_gap",
                 {
@@ -263,6 +294,14 @@ class CollectorWithCandles:
             return
         if sequence_num > last_sequence + 1:
             self.stats.gaps += 1
+            logger.warning(
+                "Collector sequence gap detectado. connection_key={} channel={} last_sequence={} sequence_num={} gap_size={}",
+                connection_key,
+                str(message.get("channel", "")).lower(),
+                last_sequence,
+                sequence_num,
+                sequence_num - last_sequence - 1,
+            )
             payload: dict[str, Any] = {
                 "connection_key": connection_key,
                 "channel": str(message.get("channel", "")).lower(),
@@ -323,7 +362,24 @@ class CollectorWithCandles:
                     "avg_lag_ms": round(self.stats.avg_lag_ms, 3),
                 },
             )
+            self._log_runtime_summary()
             await asyncio.sleep(settings.HEALTH_PUBLISH_INTERVAL)
+
+    def _log_runtime_summary(self) -> None:
+        """Emite un resumen corto y legible para Render."""
+        now = time.time()
+        if now - self._last_runtime_log_at < settings.RUNTIME_LOG_INTERVAL_SECONDS:
+            return
+        self._last_runtime_log_at = now
+        logger.info(
+            "Collector resumen: trades={} candles={} reconciled={} duplicates={} gaps={} avg_lag_ms={}",
+            self.stats.trades_received,
+            self.stats.candles_published,
+            self.stats.reconciled_candles,
+            self.stats.duplicates,
+            self.stats.gaps,
+            round(self.stats.avg_lag_ms, 3),
+        )
 
     def _build_subscription_message(
         self,
@@ -394,6 +450,12 @@ class CollectorWithCandles:
                     prefer_private=prefer_private,
                 )
             except Exception as exc:
+                logger.warning(
+                    "Collector reconcile fallo. product_id={} reason={} error={}",
+                    product_id,
+                    reason,
+                    exc,
+                )
                 await self._publish_error(
                     "collector.reconcile_failed",
                     {

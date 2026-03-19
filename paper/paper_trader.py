@@ -7,6 +7,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from loguru import logger
+
 from config import settings
 from risk.guardian import Portfolio, RiskGuardian
 
@@ -65,10 +67,21 @@ class PaperTrader:
         self.peak_equity = float(initial_cash)
         self.positions: dict[str, PaperPosition] = {}
         self.last_close_by_product: dict[str, float] = {}
+        self.processed_signals = 0
+        self.buy_fills = 0
+        self.sell_fills = 0
+        self._last_runtime_log_at = 0.0
 
     async def start(self, stop_event: asyncio.Event | None = None) -> None:
         """Arranca consumidores de velas y señales en paralelo."""
         stop_event = stop_event or asyncio.Event()
+        logger.info(
+            "PaperTrader iniciado. initial_cash={} order_notional_usd={} fee_pct={} slippage_pct={}",
+            self.initial_cash,
+            self.order_notional_usd,
+            self.fee_pct,
+            self.slippage_pct,
+        )
         candle_task = asyncio.create_task(self._consume_candles(stop_event))
         signal_task = asyncio.create_task(self._consume_signals(stop_event))
         try:
@@ -108,6 +121,7 @@ class PaperTrader:
                     event = self.handle_signal(payload)
                     await self._publish_event(event)
                     await self.redis_client.xack(settings.STREAM_INFERENCE_SIGNALS, "paper-trader-signals", message_id)
+                    self._log_runtime_summary()
 
     def handle_candle(self, payload: dict[str, Any]) -> None:
         """Actualiza el ultimo close visto por producto."""
@@ -122,6 +136,7 @@ class PaperTrader:
     def handle_signal(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Procesa una señal paper y retorna el evento auditable."""
         started = time.perf_counter()
+        self.processed_signals += 1
         product_id = str(payload.get("product_id", "")).strip().upper()
         signal = str(payload.get("signal", "HOLD")).upper()
         prob_buy = float(payload.get("prob_buy", 0.5))
@@ -271,7 +286,16 @@ class PaperTrader:
             opened_at_ms=timestamp_ms,
             model_id=model_id,
         )
+        self.buy_fills += 1
         state = self.current_state()
+        logger.info(
+            "PaperTrader BUY filled. product_id={} qty={} fill_price={} cash={} equity={}",
+            product_id,
+            round(quantity, 12),
+            round(execution_price, 8),
+            round(state.cash, 8),
+            round(state.equity, 8),
+        )
         return self._base_event(
             product_id=product_id,
             signal="BUY",
@@ -325,7 +349,17 @@ class PaperTrader:
         self.cash += proceeds
         self.realized_pnl += realized_pnl
         self.positions.pop(product_id, None)
+        self.sell_fills += 1
         state = self.current_state()
+        logger.info(
+            "PaperTrader SELL filled. product_id={} qty={} fill_price={} realized_pnl={} cash={} equity={}",
+            product_id,
+            round(position.quantity, 12),
+            round(execution_price, 8),
+            round(realized_pnl, 8),
+            round(state.cash, 8),
+            round(state.equity, 8),
+        )
         return self._base_event(
             product_id=product_id,
             signal="SELL",
@@ -379,6 +413,25 @@ class PaperTrader:
         except Exception as exc:
             if "BUSYGROUP" not in str(exc):
                 raise
+
+    def _log_runtime_summary(self) -> None:
+        """Resume el paper trading para observacion remota."""
+        now = time.time()
+        if now - self._last_runtime_log_at < settings.RUNTIME_LOG_INTERVAL_SECONDS:
+            return
+        self._last_runtime_log_at = now
+        state = self.current_state()
+        logger.info(
+            "PaperTrader resumen: signals={} buys={} sells={} open_positions={} cash={} equity={} realized_pnl={} unrealized_pnl={}",
+            self.processed_signals,
+            self.buy_fills,
+            self.sell_fills,
+            state.open_positions,
+            round(state.cash, 8),
+            round(state.equity, 8),
+            round(state.realized_pnl, 8),
+            round(state.unrealized_pnl, 8),
+        )
 
     @staticmethod
     def _to_bool(value: Any) -> bool:

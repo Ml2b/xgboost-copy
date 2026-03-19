@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
 import numpy as np
 import pandas as pd
+from loguru import logger
 from sklearn.metrics import precision_score, roc_auc_score
 
 from config import settings
@@ -69,6 +71,11 @@ class Trainer:
     async def start(self, stop_event: asyncio.Event | None = None) -> None:
         """Loop asyncrono que reentrena cada RETRAIN_INTERVAL."""
         stop_event = stop_event or asyncio.Event()
+        logger.info(
+            "Trainer unitario iniciado. registry_dir={} retrain_interval_s={}",
+            self.registry.base_dir,
+            self.retrain_interval,
+        )
         while not stop_event.is_set():
             await asyncio.to_thread(self._retrain_cycle)
             try:
@@ -336,6 +343,11 @@ class MultiAssetTrainerService:
     async def start(self, stop_event: asyncio.Event | None = None) -> None:
         """Loop asyncrono que recorre los assets y dispara su trainer dedicado."""
         stop_event = stop_event or asyncio.Event()
+        logger.info(
+            "MultiAssetTrainerService iniciado. registry_root={} retrain_interval_s={}",
+            self.registry_root,
+            self.retrain_interval,
+        )
         while not stop_event.is_set():
             await asyncio.to_thread(self._retrain_all_assets)
             self.multi_registry.refresh()
@@ -345,8 +357,24 @@ class MultiAssetTrainerService:
                 continue
 
     def _retrain_all_assets(self) -> None:
+        cycle_started = time.perf_counter()
         self._sync_history()
+        total_assets = 0
+        trained_assets = 0
+        promoted_assets = 0
+        logger.info(
+            "Trainer ciclo iniciado. assets={} registry_root={}",
+            len(self.multi_registry.get_registry_keys()),
+            self.registry_root,
+        )
         for artifact in self._iter_registry_artifacts():
+            total_assets += 1
+            asset_started = time.perf_counter()
+            logger.info(
+                "Trainer asset iniciado. base_asset={} registry_key={}",
+                artifact.base_asset,
+                artifact.registry_key,
+            )
             trainer = Trainer(
                 registry=ModelRegistry(base_dir=self.registry_root / artifact.registry_key),
                 data_loader=lambda base_asset=artifact.base_asset: self._load_candles_for_base(base_asset),
@@ -354,7 +382,28 @@ class MultiAssetTrainerService:
                 selector_config=self.selector_config,
                 retrain_interval=self.retrain_interval,
             )
-            trainer._retrain_cycle()
+            result = trainer._retrain_cycle()
+            if result.status == "trained":
+                trained_assets += 1
+            if result.promoted:
+                promoted_assets += 1
+            logger.info(
+                "Trainer asset finalizado. base_asset={} status={} promoted={} auc={} continuation={} history_rows={} duration_s={}",
+                artifact.base_asset,
+                result.status,
+                result.promoted,
+                round(result.auc, 4),
+                result.used_continuation,
+                result.history_rows,
+                round(time.perf_counter() - asset_started, 2),
+            )
+        logger.info(
+            "Trainer ciclo finalizado. assets={} trained={} promoted={} duration_s={}",
+            total_assets,
+            trained_assets,
+            promoted_assets,
+            round(time.perf_counter() - cycle_started, 2),
+        )
 
     def _load_candles_for_base(self, base_asset: str) -> pd.DataFrame | None:
         return self.history_store.load_candles_for_base(base_asset)
@@ -363,7 +412,8 @@ class MultiAssetTrainerService:
         """Persiste velas nuevas antes de disparar el reentrenamiento por activo."""
         if self.redis_client is None:
             return
-        self.history_store.sync_from_redis_stream(self.redis_client)
+        synced_rows = self.history_store.sync_from_redis_stream(self.redis_client)
+        logger.info("Trainer sync history completado. inserted_rows={}", synced_rows)
 
     def _iter_registry_artifacts(self):
         for registry_key in self.multi_registry.get_registry_keys():

@@ -10,6 +10,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from loguru import logger
 
 from config import settings
 from model.registry import ModelRegistry, MultiAssetModelRegistry, ResolvedModelArtifact
@@ -43,7 +44,9 @@ class InferenceEngine:
         self.total_inferences = 0
         self.total_signals = 0
         self.latency_total_ms = 0.0
+        self.observation_events = 0
         self._loaded_models: dict[str, LoadedModelBundle] = {}
+        self._last_runtime_log_at = 0.0
         self.buy_thresholds_by_base = {
             base.strip().upper(): float(value)
             for base, value in (buy_thresholds_by_base or {}).items()
@@ -84,6 +87,7 @@ class InferenceEngine:
     async def start(self, stop_event: asyncio.Event | None = None) -> None:
         """Consume market.features y publica inference.signals."""
         stop_event = stop_event or asyncio.Event()
+        logger.info("InferenceEngine iniciado. model_reload_interval={}s", settings.MODEL_RELOAD_INTERVAL)
         reload_task = asyncio.create_task(self._reload_loop(stop_event))
         try:
             if self.redis_client is None:
@@ -124,6 +128,8 @@ class InferenceEngine:
         product_id = str(payload.get("product_id", "")).strip()
         bundle = self._get_loaded_bundle(product_id)
         if bundle is None:
+            self.observation_events += 1
+            self._log_runtime_summary()
             return self._build_observation_result(
                 product_id=product_id,
                 model_id="",
@@ -146,12 +152,7 @@ class InferenceEngine:
         latency_ms = (time.perf_counter() - started) * 1000.0
         self.total_inferences += 1
         self.latency_total_ms += latency_ms
-        if self.total_inferences % 50 == 0:
-            print(
-                "[InferenceEngine] "
-                f"total={self.total_inferences} signals={self.total_signals} "
-                f"latency_ms_avg={self.latency_total_ms / self.total_inferences:.3f}"
-            )
+        self._log_runtime_summary()
 
         return {
             "product_id": product_id,
@@ -216,6 +217,13 @@ class InferenceEngine:
             model=self._load_model(artifact.model_path),
         )
         self._loaded_models[artifact.registry_key] = loaded
+        logger.info(
+            "InferenceEngine cargo modelo. registry_key={} model_id={} actionable={} features={}",
+            artifact.registry_key,
+            artifact.model_id,
+            artifact.actionable,
+            len(artifact.feature_names),
+        )
         if artifact.actionable:
             self.model = loaded.model
             self.model_path = artifact.model_path
@@ -278,6 +286,24 @@ class InferenceEngine:
         if sell_threshold > buy_threshold:
             sell_threshold = buy_threshold
         return buy_threshold, sell_threshold
+
+    def _log_runtime_summary(self) -> None:
+        """Resume inferencia para los logs de Render."""
+        now = time.time()
+        if now - self._last_runtime_log_at < settings.RUNTIME_LOG_INTERVAL_SECONDS:
+            return
+        self._last_runtime_log_at = now
+        avg_latency = 0.0
+        if self.total_inferences > 0:
+            avg_latency = self.latency_total_ms / self.total_inferences
+        logger.info(
+            "InferenceEngine resumen: total={} non_hold={} observations={} avg_latency_ms={} cached_models={}",
+            self.total_inferences,
+            self.total_signals,
+            self.observation_events,
+            round(avg_latency, 3),
+            len(self._loaded_models),
+        )
 
     @staticmethod
     def _build_observation_result(

@@ -7,6 +7,8 @@ import contextlib
 import json
 import os
 import signal
+import sys
+import time
 from collections import defaultdict, deque
 from typing import Any
 
@@ -33,9 +35,13 @@ class FeatureEngine:
         self.buffers: dict[str, deque[dict[str, Any]]] = defaultdict(
             lambda: deque(maxlen=settings.FEATURE_BUFFER_SIZE)
         )
+        self.candles_consumed = 0
+        self.features_published = 0
+        self._last_runtime_log_at = 0.0
 
     async def start(self, stop_event: asyncio.Event | None = None) -> None:
         stop_event = stop_event or asyncio.Event()
+        logger.info("FeatureEngine iniciado. buffer_size={}", settings.FEATURE_BUFFER_SIZE)
         await self._ensure_group(settings.STREAM_MARKET_CANDLES_1M, "feature-engine")
         while not stop_event.is_set():
             messages = await self.redis_client.xreadgroup(
@@ -52,6 +58,7 @@ class FeatureEngine:
 
     async def _process_candle(self, payload: dict[str, Any]) -> None:
         product_id = payload.get("product_id", "")
+        self.candles_consumed += 1
         normalized = {
             "product_id": product_id,
             "open_time": int(payload["open_time"]),
@@ -74,6 +81,21 @@ class FeatureEngine:
             settings.STREAM_MARKET_FEATURES,
             {key: str(value) for key, value in latest.items()},
         )
+        self.features_published += 1
+        self._log_runtime_summary()
+
+    def _log_runtime_summary(self) -> None:
+        """Resume el estado del motor de features sin ruido por vela."""
+        now = time.time()
+        if now - self._last_runtime_log_at < settings.RUNTIME_LOG_INTERVAL_SECONDS:
+            return
+        self._last_runtime_log_at = now
+        logger.info(
+            "FeatureEngine resumen: candles={} features={} activos_buffer={}",
+            self.candles_consumed,
+            self.features_published,
+            len(self.buffers),
+        )
 
     async def _ensure_group(self, stream: str, group_name: str) -> None:
         try:
@@ -85,6 +107,7 @@ class FeatureEngine:
 
 async def run_service(name: str, factory, stop_event: asyncio.Event) -> None:
     """Mantiene vivo un servicio aunque falle y lo reinicia."""
+    logger.info("Servicio {} lanzado", name)
     while not stop_event.is_set():
         try:
             await factory()
@@ -100,7 +123,24 @@ async def async_main() -> None:
     import redis.asyncio as redis_async
     import redis as redis_sync
 
-    logger.add("logs/trading_{time:YYYY-MM-DD}.log", rotation="1 day", retention=7)
+    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    logger.remove()
+    logger.add(
+        sys.stderr,
+        level=log_level,
+        enqueue=True,
+        backtrace=False,
+        diagnose=False,
+    )
+    logger.add(
+        "logs/trading_{time:YYYY-MM-DD}.log",
+        rotation="1 day",
+        retention=7,
+        level=log_level,
+        enqueue=True,
+        backtrace=False,
+        diagnose=False,
+    )
     logger.info("python main.py")
     logger.info("python -m pytest tests/")
     logger.warning(
@@ -126,6 +166,7 @@ async def async_main() -> None:
         logger.warning("No se pudo validar la autenticacion Coinbase: {}", exc)
 
     observed_products = await _resolve_observed_products(redis_client_async, coinbase_client)
+    logger.info("Universo observado cargado. products={} ", observed_products)
     registry = MultiAssetModelRegistry(root_dir=settings.MODEL_REGISTRY_ROOT)
     collector = CollectorWithCandles(
         redis_client=redis_client_async,
@@ -147,6 +188,7 @@ async def async_main() -> None:
     )
     paper_trader = PaperTrader(redis_client=redis_client_async)
 
+    service_names = ["collector", "feature_engine", "inference", "trainer", "order_manager"]
     services = [
         asyncio.create_task(run_service("collector", lambda: collector.start(stop_event), stop_event)),
         asyncio.create_task(run_service("feature_engine", lambda: feature_engine.start(stop_event), stop_event)),
@@ -158,6 +200,8 @@ async def async_main() -> None:
         services.append(
             asyncio.create_task(run_service("paper_trader", lambda: paper_trader.start(stop_event), stop_event))
         )
+        service_names.append("paper_trader")
+    logger.info("Servicios principales activos: {}", service_names)
 
     try:
         await stop_event.wait()
