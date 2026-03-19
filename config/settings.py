@@ -192,6 +192,12 @@ RETRAIN_INTERVAL: Final[int] = 2 * 3600
 MIN_MODEL_AUC: Final[float] = 0.53
 MIN_SIGNAL_PROB: Final[float] = 0.62
 MODEL_RELOAD_INTERVAL: Final[int] = 30
+REGIME_GATE_ENABLED: Final[bool] = os.getenv("REGIME_GATE_ENABLED", "true").lower() == "true"
+REGIME_VOL_EXTREME_MAX: Final[float] = float(os.getenv("REGIME_VOL_EXTREME_MAX", "0.006"))
+REGIME_RANGE_COMPRESSION_MIN: Final[float] = float(
+    os.getenv("REGIME_RANGE_COMPRESSION_MIN", "0.25")
+)
+REGIME_BB_WIDTH_MIN: Final[float] = float(os.getenv("REGIME_BB_WIDTH_MIN", "0.004"))
 MODEL_REGISTRY_ROOT: Final[str] = os.getenv("MODEL_REGISTRY_ROOT", "models/multi_asset_live_v2")
 STUDIED_UNIVERSE_PAPER_ROOT: Final[str] = os.getenv(
     "STUDIED_UNIVERSE_PAPER_ROOT",

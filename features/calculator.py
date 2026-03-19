@@ -14,6 +14,7 @@ FEATURE_COLUMNS: list[str] = [
     "ret_15",
     "ret_30",
     "ret_60",
+    "signed_return_1_volume",
     "rsi_14",
     "rsi_divergence",
     "macd_hist",
@@ -22,17 +23,21 @@ FEATURE_COLUMNS: list[str] = [
     "atr_pct",
     "bb_pct",
     "bb_width",
+    "realized_vol_5",
     "realized_vol_20",
     "price_vs_ema_fast",
     "price_vs_ema_slow",
     "price_vs_ema_trend",
     "ema_fast_above_slow",
     "ema_full_alignment",
+    "vwap_20_distance",
     "position_in_range_20",
+    "range_compression_20",
     "trend_slope_pct",
     "volume_ratio",
     "volume_spike",
     "volume_trend",
+    "trade_intensity_20",
     "hl_ratio",
     "close_position_in_candle",
     "body_to_range_ratio",
@@ -79,6 +84,7 @@ class FeatureCalculator:
         result["ret_15"] = self._pct_return(close, 15)
         result["ret_30"] = self._pct_return(close, 30)
         result["ret_60"] = self._pct_return(close, 60)
+        result["signed_return_1_volume"] = result["ret_1"] * np.log1p(volume)
 
         rsi = self._rsi_wilder(close, self.rsi_period)
         result["rsi_14"] = rsi
@@ -104,6 +110,9 @@ class FeatureCalculator:
         log_ret = np.full(len(result), np.nan, dtype=float)
         if len(result) > 1:
             log_ret[1:] = np.diff(np.log(close))
+        result["realized_vol_5"] = (
+            pd.Series(log_ret).rolling(5, min_periods=5).std().to_numpy()
+        )
         result["realized_vol_20"] = (
             pd.Series(log_ret).rolling(20, min_periods=20).std().to_numpy()
         )
@@ -117,12 +126,24 @@ class FeatureCalculator:
         result["ema_fast_above_slow"] = (ema_fast > ema_slow).astype(float)
         result["ema_full_alignment"] = ((ema_fast > ema_slow) & (ema_slow > ema_trend)).astype(float)
 
+        rolling_quote = pd.Series(close * volume).rolling(20, min_periods=20).sum().to_numpy()
+        rolling_volume_20 = pd.Series(volume).rolling(20, min_periods=20).sum().to_numpy()
+        vwap_20 = np.full(len(result), np.nan, dtype=float)
+        np.divide(rolling_quote, rolling_volume_20, out=vwap_20, where=rolling_volume_20 > 0)
+        vwap_distance = np.full(len(result), np.nan, dtype=float)
+        np.divide(close - vwap_20, vwap_20, out=vwap_distance, where=vwap_20 > 0)
+        result["vwap_20_distance"] = vwap_distance
+
         high_20 = pd.Series(high).rolling(20, min_periods=20).max().to_numpy()
         low_20 = pd.Series(low).rolling(20, min_periods=20).min().to_numpy()
         range_20 = high_20 - low_20
         position_in_range = np.full(len(result), np.nan, dtype=float)
         np.divide(close - low_20, range_20, out=position_in_range, where=range_20 > 0)
         result["position_in_range_20"] = np.clip(position_in_range, 0.0, 1.0)
+        avg_range_20 = pd.Series(high - low).rolling(20, min_periods=20).mean().to_numpy()
+        range_compression = np.full(len(result), np.nan, dtype=float)
+        np.divide(high - low, avg_range_20, out=range_compression, where=avg_range_20 > 0)
+        result["range_compression_20"] = range_compression
         result["trend_slope_pct"] = self._rolling_slope(close, self.trend_period)
 
         vol_mean = pd.Series(volume).rolling(self.volume_ma_period, min_periods=self.volume_ma_period).mean().to_numpy()
@@ -131,6 +152,12 @@ class FeatureCalculator:
         result["volume_ratio"] = volume_ratio
         result["volume_spike"] = (result["volume_ratio"] > 2.0).astype(float)
         result["volume_trend"] = self._rolling_slope(volume, 10)
+
+        trade_count = self._resolve_trade_count(result, close, open_)
+        rolling_trade_count = pd.Series(trade_count).rolling(20, min_periods=20).sum().to_numpy()
+        trade_intensity = np.full(len(result), np.nan, dtype=float)
+        np.divide(rolling_trade_count, rolling_volume_20, out=trade_intensity, where=rolling_volume_20 > 0)
+        result["trade_intensity_20"] = trade_intensity
 
         candle_range = high - low
         body = np.abs(close - open_)
@@ -167,6 +194,19 @@ class FeatureCalculator:
             return result
         result[lag:] = values[lag:] / values[:-lag] - 1.0
         return result
+
+    @staticmethod
+    def _resolve_trade_count(
+        frame: pd.DataFrame,
+        close: np.ndarray,
+        open_: np.ndarray,
+    ) -> np.ndarray:
+        """Usa trade_count real si existe; si no, genera un proxy estable."""
+        if "trade_count" in frame.columns:
+            trade_count = frame["trade_count"].astype(float).to_numpy()
+            return np.maximum(trade_count, 1.0)
+        proxy = np.where(close > 0, (np.abs(close - open_) / close) * 10_000.0, 1.0)
+        return np.maximum(proxy, 1.0)
 
     @staticmethod
     def _ema(values: np.ndarray, period: int) -> np.ndarray:

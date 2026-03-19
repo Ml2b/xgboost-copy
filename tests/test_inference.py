@@ -104,6 +104,58 @@ def test_inference_accepts_per_asset_threshold_overrides(tmp_path) -> None:
     assert hold_result["buy_threshold"] == 0.62
 
 
+def test_inference_blocks_signal_when_regime_is_extreme(tmp_path) -> None:
+    model_path = tmp_path / "active.pkl"
+    joblib.dump(DummyProbModel(), model_path)
+    engine = InferenceEngine(  # type: ignore[arg-type]
+        DummyRegistry(str(model_path), ["f1"]),
+        regime_gate_enabled=True,
+        regime_vol_extreme_max=0.001,
+        regime_range_compression_min=0.2,
+        regime_bb_width_min=0.003,
+    )
+
+    result = engine.predict_signal(
+        {
+            "product_id": "BTC-USD",
+            "f1": 0.95,
+            "realized_vol_5": 0.002,
+            "range_compression_20": 0.8,
+            "bb_width": 0.02,
+        }
+    )
+    assert result is not None
+    assert result["signal"] == "HOLD"
+    assert result["actionable"] == "false"
+    assert result["reason"] == "regime_blocked_extreme_volatility"
+    assert result["regime"] == "extreme_volatility"
+    assert result["regime_actionable"] == "false"
+
+
+def test_inference_keeps_signal_when_regime_gate_disabled(tmp_path) -> None:
+    model_path = tmp_path / "active.pkl"
+    joblib.dump(DummyProbModel(), model_path)
+    engine = InferenceEngine(  # type: ignore[arg-type]
+        DummyRegistry(str(model_path), ["f1"]),
+        regime_gate_enabled=False,
+    )
+
+    result = engine.predict_signal(
+        {
+            "product_id": "ETH-USD",
+            "f1": 0.9,
+            "realized_vol_5": 0.01,
+            "range_compression_20": 0.05,
+            "bb_width": 0.001,
+        }
+    )
+    assert result is not None
+    assert result["signal"] == "BUY"
+    assert result["actionable"] == "true"
+    assert result["regime"] == "disabled"
+    assert result["regime_actionable"] == "true"
+
+
 def _write_asset(root: Path, registry_key: str, feature_names: list[str], promoted: bool) -> None:
     asset_dir = root / registry_key
     asset_dir.mkdir(parents=True, exist_ok=True)

@@ -68,6 +68,7 @@ class FeatureEngine:
             "low": float(payload["low"]),
             "close": float(payload["close"]),
             "volume": float(payload["volume"]),
+            "trade_count": int(float(payload.get("trade_count", 0))),
         }
         self.buffers[product_id].append(normalized)
         buffer = list(self.buffers[product_id])

@@ -24,6 +24,15 @@ class LoadedModelBundle:
     model: object
 
 
+@dataclass(slots=True)
+class RegimeDecision:
+    """Resultado de la compuerta de regimen de mercado."""
+
+    regime: str
+    actionable: bool
+    reason: str
+
+
 class InferenceEngine:
     """Carga el modelo activo y emite senales BUY/SELL/HOLD."""
 
@@ -33,6 +42,10 @@ class InferenceEngine:
         redis_client: Any | None = None,
         buy_thresholds_by_base: dict[str, float] | None = None,
         sell_thresholds_by_base: dict[str, float] | None = None,
+        regime_gate_enabled: bool = settings.REGIME_GATE_ENABLED,
+        regime_vol_extreme_max: float = settings.REGIME_VOL_EXTREME_MAX,
+        regime_range_compression_min: float = settings.REGIME_RANGE_COMPRESSION_MIN,
+        regime_bb_width_min: float = settings.REGIME_BB_WIDTH_MIN,
     ) -> None:
         self.registry = registry
         self.redis_client = redis_client
@@ -57,6 +70,10 @@ class InferenceEngine:
             for base, value in (sell_thresholds_by_base or {}).items()
             if base.strip()
         }
+        self.regime_gate_enabled = bool(regime_gate_enabled)
+        self.regime_vol_extreme_max = float(regime_vol_extreme_max)
+        self.regime_range_compression_min = float(regime_range_compression_min)
+        self.regime_bb_width_min = float(regime_bb_width_min)
         self.load_active_model()
 
     def load_active_model(self) -> None:
@@ -142,12 +159,20 @@ class InferenceEngine:
         frame = pd.DataFrame([row], columns=bundle.artifact.feature_names)
         prob_buy = float(self._predict_proba(bundle.model, frame)[0])
         buy_threshold, sell_threshold = self._resolve_signal_thresholds(product_id)
+        regime = self._evaluate_regime(payload)
+        effective_actionable = bundle.artifact.actionable and regime.actionable
 
         signal = "HOLD"
         if prob_buy >= buy_threshold:
             signal = "BUY"
         elif prob_buy <= sell_threshold:
             signal = "SELL"
+        if signal != "HOLD" and not regime.actionable:
+            signal = "HOLD"
+
+        reason = bundle.artifact.reason
+        if bundle.artifact.actionable and not regime.actionable:
+            reason = regime.reason
 
         latency_ms = (time.perf_counter() - started) * 1000.0
         self.total_inferences += 1
@@ -160,11 +185,13 @@ class InferenceEngine:
             "prob_buy": round(prob_buy, 6),
             "model_id": bundle.artifact.model_id,
             "latency_ms": round(latency_ms, 3),
-            "actionable": str(bundle.artifact.actionable).lower(),
-            "reason": bundle.artifact.reason,
+            "actionable": str(effective_actionable).lower(),
+            "reason": reason,
             "registry_key": bundle.artifact.registry_key,
             "buy_threshold": round(buy_threshold, 6),
             "sell_threshold": round(sell_threshold, 6),
+            "regime": regime.regime,
+            "regime_actionable": str(regime.actionable).lower(),
         }
 
     def _predict_proba(self, model: object, frame: pd.DataFrame) -> np.ndarray:
@@ -287,6 +314,36 @@ class InferenceEngine:
             sell_threshold = buy_threshold
         return buy_threshold, sell_threshold
 
+    def _evaluate_regime(self, payload: dict[str, Any]) -> RegimeDecision:
+        """Bloquea ejecucion en regimenes extremos definidos por heuristicas."""
+        if not self.regime_gate_enabled:
+            return RegimeDecision(regime="disabled", actionable=True, reason="regime_gate_disabled")
+
+        realized_vol_5 = self._to_float(payload.get("realized_vol_5"))
+        range_compression_20 = self._to_float(payload.get("range_compression_20"))
+        bb_width = self._to_float(payload.get("bb_width"))
+        if not np.isfinite(realized_vol_5) or not np.isfinite(range_compression_20) or not np.isfinite(bb_width):
+            return RegimeDecision(regime="unknown", actionable=True, reason="regime_insufficient_features")
+
+        if realized_vol_5 >= self.regime_vol_extreme_max:
+            return RegimeDecision(
+                regime="extreme_volatility",
+                actionable=False,
+                reason="regime_blocked_extreme_volatility",
+            )
+
+        if (
+            range_compression_20 <= self.regime_range_compression_min
+            and bb_width <= self.regime_bb_width_min
+        ):
+            return RegimeDecision(
+                regime="compressed",
+                actionable=False,
+                reason="regime_blocked_compression",
+            )
+
+        return RegimeDecision(regime="normal", actionable=True, reason="ok")
+
     def _log_runtime_summary(self) -> None:
         """Resume inferencia para los logs de Render."""
         now = time.time()
@@ -325,7 +382,16 @@ class InferenceEngine:
             "registry_key": registry_key,
             "buy_threshold": buy_threshold,
             "sell_threshold": sell_threshold,
+            "regime": "no_model",
+            "regime_actionable": "false",
         }
+
+    @staticmethod
+    def _to_float(value: Any) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return float("nan")
 
     class _NoOpModel:
         """Modelo neutro para publicar observacion sin huecos silenciosos."""
