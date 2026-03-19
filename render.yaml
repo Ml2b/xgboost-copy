@@ -23,6 +23,14 @@ services:
         value: /opt/render/project/src/runtime/trainer_candle_history.sqlite3
       - key: PYTHONUNBUFFERED
         value: "1"
+      - key: RENDER_HISTORY_BOOTSTRAP_ENABLED
+        value: "true"
+      - key: RENDER_HISTORY_BOOTSTRAP_TARGET_ROWS
+        value: "1500"
+      - key: RENDER_HISTORY_BOOTSTRAP_CHUNK_LIMIT
+        value: "350"
+      - key: RENDER_HISTORY_BOOTSTRAP_MAX_REQUESTS_PER_ASSET
+        value: "6"
       - key: EXECUTION_ENABLED
         value: "true"
       - key: EXECUTION_DRY_RUN
