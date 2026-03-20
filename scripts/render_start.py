@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import contextlib
+import http.server
 import os
 import shutil
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -26,8 +28,31 @@ DEFAULT_HISTORY_CHUNK_LIMIT = 350
 DEFAULT_HISTORY_MAX_REQUESTS_PER_ASSET = 6
 
 
+def _start_bootstrap_health_server() -> None:
+    """Arranca un servidor HTTP minimo para que Render detecte el puerto durante el bootstrap."""
+    port = int(os.getenv("PORT", "10000"))
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            body = b'{"status":"bootstrapping"}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):  # noqa: ANN002
+            pass  # silenciar logs del servidor de bootstrap
+
+    server = http.server.HTTPServer(("0.0.0.0", port), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    print(f"[render_start] bootstrap health server listening on port {port}", flush=True)
+
+
 def main() -> None:
     """Prepara el entorno persistente y arranca el worker principal."""
+    _start_bootstrap_health_server()
     model_root = Path(
         os.getenv(
             "MODEL_REGISTRY_ROOT",
