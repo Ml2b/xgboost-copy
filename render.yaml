@@ -58,5 +58,5 @@ services:
   - type: keyvalue
     name: xgboost-redis
     plan: starter
-    maxmemoryPolicy: noeviction
+    maxmemoryPolicy: allkeys-lru
     ipAllowList: []
