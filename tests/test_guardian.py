@@ -43,12 +43,12 @@ def test_guardian_each_checkpoint_can_block_independently() -> None:
     )[0] is False
 
 
-def test_guardian_accepts_sell_when_confidence_comes_from_one_minus_prob_buy() -> None:
+def test_guardian_allows_exit_long_even_with_entry_filters_violated() -> None:
     guardian = RiskGuardian()
     portfolio = Portfolio(capital_total=1000, capital_disponible=1000, drawdown_hoy=0.0, posiciones_abiertas=1)
 
     ok, reason = guardian.check(
-        {"signal": "SELL", "risk_pct": 0.005, "prob_buy": 0.1, "spread_pct": 0.001},
+        {"signal": "EXIT_LONG", "risk_pct": 0.05, "prob_buy": 0.95, "spread_pct": 0.5},
         "BTC-USDT",
         portfolio,
     )

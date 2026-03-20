@@ -20,7 +20,11 @@ from features.calculator import FeatureCalculator
 from features.selector import SelectorConfig
 from model.registry import ModelMetrics, ModelRecord, ModelRegistry, MultiAssetModelRegistry
 from target.builder import TargetBuilder, TargetConfig, TargetType
-from validation.walk_forward import WalkForwardConfig, WalkForwardValidator
+from validation.walk_forward import (
+    WalkForwardConfig,
+    WalkForwardValidator,
+    build_purged_train_validation_bounds,
+)
 
 
 @dataclass(slots=True)
@@ -141,22 +145,25 @@ class Trainer:
                 reason=str(exc),
             )
         stable_features = wf_result.stable_features
+        df_wf = labeled_df.iloc[: wf_result.test_start_idx].reset_index(drop=True)
+        df_test = labeled_df.iloc[wf_result.test_start_idx :].reset_index(drop=True)
+        sample_weight_wf = sample_weight[: wf_result.test_start_idx] if sample_weight is not None else None
         final_model, used_continuation = self._fit_final_model(
-            labeled_df,
+            df_wf,
             stable_features,
-            sample_weight=sample_weight,
+            sample_weight=sample_weight_wf,
         )
-        metrics = self._compute_model_metrics(labeled_df, stable_features, final_model)
+        metrics = self._compute_holdout_metrics(df_test, stable_features, final_model)
 
         timestamps = pd.to_datetime(labeled_df["open_time"], unit="ms", utc=True)
-        split_idx = max(1, int(len(timestamps) * 0.85))
+        holdout_start_idx = max(1, wf_result.test_start_idx)
         record = self.registry.register(
             model=final_model,
             metrics=metrics,
             fechas={
                 "train_start": timestamps.iloc[0].isoformat(),
-                "train_end": timestamps.iloc[split_idx - 1].isoformat(),
-                "val_start": timestamps.iloc[split_idx].isoformat() if split_idx < len(timestamps) else timestamps.iloc[-1].isoformat(),
+                "train_end": timestamps.iloc[holdout_start_idx - 1].isoformat(),
+                "val_start": timestamps.iloc[holdout_start_idx].isoformat() if holdout_start_idx < len(timestamps) else timestamps.iloc[-1].isoformat(),
                 "val_end": timestamps.iloc[-1].isoformat(),
             },
             feature_names=stable_features,
@@ -204,13 +211,16 @@ class Trainer:
         feature_names: list[str],
         sample_weight: np.ndarray | None = None,
     ) -> tuple[object, bool]:
-        split = max(1, int(len(df) * 0.85))
-        X_train = df.iloc[:split][feature_names]
-        y_train = df.iloc[:split]["target"].to_numpy(dtype=int)
-        X_val = df.iloc[split:][feature_names]
-        y_val = df.iloc[split:]["target"].to_numpy(dtype=int)
-        w_train = sample_weight[:split] if sample_weight is not None else None
-        w_val = sample_weight[split:] if sample_weight is not None else None
+        train_end, val_start = build_purged_train_validation_bounds(
+            len(df),
+            self.walk_forward_config.gap_periods,
+        )
+        X_train = df.iloc[:train_end][feature_names]
+        y_train = df.iloc[:train_end]["target"].to_numpy(dtype=int)
+        X_val = df.iloc[val_start:][feature_names]
+        y_val = df.iloc[val_start:]["target"].to_numpy(dtype=int)
+        w_train = sample_weight[:train_end] if sample_weight is not None else None
+        w_val = sample_weight[val_start:] if sample_weight is not None else None
         if len(X_val) == 0:
             X_val = X_train.iloc[-min(100, len(X_train)) :]
             y_val = y_train[-len(X_val) :]
@@ -245,20 +255,21 @@ class Trainer:
         )
         return model, False
 
-    def _compute_model_metrics(self, df: pd.DataFrame, feature_names: list[str], model: object) -> ModelMetrics:
-        split = max(1, int(len(df) * 0.85))
-        X_val = df.iloc[split:][feature_names]
-        y_val = df.iloc[split:]["target"].to_numpy(dtype=int)
+    def _compute_holdout_metrics(self, df: pd.DataFrame, feature_names: list[str], model: object) -> ModelMetrics:
+        X_val = df[feature_names]
+        y_val = df["target"].to_numpy(dtype=int)
         if len(X_val) == 0:
-            X_val = df.iloc[-min(100, len(df)) :][feature_names]
-            y_val = df.iloc[-len(X_val) :]["target"].to_numpy(dtype=int)
+            raise ValueError("El holdout final no puede estar vacio.")
 
         probs = self._predict_proba(model, X_val)
-        auc = float(roc_auc_score(y_val, probs))
+        try:
+            auc = float(roc_auc_score(y_val, probs))
+        except ValueError:
+            auc = 0.5
         buy_preds = (probs >= settings.MIN_SIGNAL_PROB).astype(int)
         precision_buy = float(precision_score(y_val, buy_preds, zero_division=0))
 
-        returns = df.iloc[split:]["target_return"].to_numpy(dtype=float)
+        returns = df["target_return"].to_numpy(dtype=float)
         trade_returns = returns[buy_preds == 1]
         win_rate = float(np.mean(trade_returns > 0)) if len(trade_returns) else 0.0
         sharpe = self._compute_sharpe(trade_returns)

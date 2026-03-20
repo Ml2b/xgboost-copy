@@ -7,7 +7,7 @@ from sklearn.ensemble import RandomForestClassifier
 from features.calculator import FeatureCalculator
 from target.builder import TargetBuilder, TargetConfig, TargetType
 from tests.helpers import make_synthetic_candles
-from validation.walk_forward import WalkForwardConfig, WalkForwardValidator
+from validation.walk_forward import WalkForwardConfig, WalkForwardValidator, build_purged_train_validation_bounds
 
 
 def test_walk_forward_computes_final_test_once_and_keeps_it_separate() -> None:
@@ -63,3 +63,9 @@ def test_walk_forward_accepts_sample_weight_without_breaking_contract() -> None:
 
     assert result.final_test_evaluations == 1
     assert result.auc_test_final >= 0.0
+
+
+def test_final_purged_split_reserves_gap_between_train_and_validation() -> None:
+    train_end, val_start = build_purged_train_validation_bounds(1000, 15)
+    assert train_end == 835
+    assert val_start == 850

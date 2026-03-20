@@ -30,12 +30,12 @@ class TargetConfig:
     net_threshold_pct: float = field(init=False)
 
     def __post_init__(self) -> None:
-        self.net_threshold_pct = self.threshold_pct - (self.fee_pct * 2.0)
+        # threshold_pct se interpreta como retorno neto minimo despues de fees.
+        # Asi evitamos una cancelacion algebraica donde la etiqueta binaria
+        # termina ignorando el costo round-trip.
+        self.net_threshold_pct = self.threshold_pct
         if self.net_threshold_pct <= 0:
-            raise ValueError(
-                "El threshold neto debe ser positivo despues de fees. "
-                f"threshold_pct={self.threshold_pct}, fee_pct={self.fee_pct}"
-            )
+            raise ValueError("threshold_pct debe ser positivo.")
         if self.stop_loss_pct is None:
             self.stop_loss_pct = self.threshold_pct
 
@@ -119,4 +119,3 @@ class TargetBuilder:
             target_return[idx] = exit_return
 
         return target, target_return
-

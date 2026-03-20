@@ -10,6 +10,7 @@ from typing import Any
 from loguru import logger
 
 from config import settings
+from execution.position_exit import PositionExitPolicy
 from risk.guardian import Portfolio, RiskGuardian
 
 
@@ -50,6 +51,7 @@ class PaperTrader:
         fee_pct: float = settings.PAPER_FEE_PCT,
         slippage_pct: float = settings.PAPER_SLIPPAGE_PCT,
         slippage_pct_by_base: dict[str, float] | None = None,
+        exit_policy: PositionExitPolicy | None = None,
     ) -> None:
         self.redis_client = redis_client
         self.guardian = guardian or RiskGuardian()
@@ -62,6 +64,7 @@ class PaperTrader:
             for base, value in (slippage_pct_by_base or {}).items()
             if base.strip()
         }
+        self.exit_policy = exit_policy or PositionExitPolicy()
         self.cash = float(initial_cash)
         self.realized_pnl = 0.0
         self.peak_equity = float(initial_cash)
@@ -103,7 +106,9 @@ class PaperTrader:
             )
             for _, stream_messages in messages:
                 for message_id, payload in stream_messages:
-                    self.handle_candle(payload)
+                    event = self.handle_candle(payload)
+                    if event is not None:
+                        await self._publish_event(event)
                     await self.redis_client.xack(settings.STREAM_MARKET_CANDLES_1M, "paper-trader-candles", message_id)
 
     async def _consume_signals(self, stop_event: asyncio.Event) -> None:
@@ -123,15 +128,41 @@ class PaperTrader:
                     await self.redis_client.xack(settings.STREAM_INFERENCE_SIGNALS, "paper-trader-signals", message_id)
                     self._log_runtime_summary()
 
-    def handle_candle(self, payload: dict[str, Any]) -> None:
-        """Actualiza el ultimo close visto por producto."""
+    def handle_candle(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        """Actualiza precios y ejecuta salidas protectivas si corresponde."""
         product_id = str(payload.get("product_id", "")).strip().upper()
         if not product_id:
-            return
+            return None
         try:
             self.last_close_by_product[product_id] = float(payload["close"])
         except Exception:
-            return
+            return None
+
+        position = self.positions.get(product_id)
+        if position is None:
+            return None
+
+        timestamp_ms = int(payload.get("close_time") or payload.get("open_time") or int(time.time() * 1000))
+        exit_decision = self.exit_policy.evaluate(
+            entry_price=position.entry_price,
+            opened_at_ms=position.opened_at_ms,
+            current_price=self.last_close_by_product[product_id],
+            now_ms=timestamp_ms,
+        )
+        if not exit_decision.should_exit:
+            return None
+        return self._close_position(
+            product_id=product_id,
+            signal="EXIT_LONG",
+            price=self.last_close_by_product[product_id],
+            prob_buy=0.5,
+            model_id=position.model_id,
+            registry_key="",
+            timestamp_ms=timestamp_ms,
+            started=time.perf_counter(),
+            decision="paper_exit_rule_filled",
+            exit_reason=exit_decision.reason,
+        )
 
     def handle_signal(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Procesa una señal paper y retorna el evento auditable."""
@@ -193,14 +224,29 @@ class PaperTrader:
                 timestamp_ms=timestamp_ms,
                 started=started,
             )
-        return self._handle_sell(
+        if signal in {"SELL", "EXIT_LONG"}:
+            return self._close_position(
+                product_id=product_id,
+                signal="EXIT_LONG",
+                price=price,
+                prob_buy=prob_buy,
+                model_id=model_id,
+                registry_key=registry_key,
+                timestamp_ms=timestamp_ms,
+                started=started,
+                decision="paper_exit_signal_filled",
+                exit_reason="signal_exit_long",
+            )
+        return self._base_event(
             product_id=product_id,
-            price=price,
+            signal=signal,
+            decision="ignored_unknown_signal",
             prob_buy=prob_buy,
             model_id=model_id,
             registry_key=registry_key,
-            timestamp_ms=timestamp_ms,
-            started=started,
+            actionable=False,
+            reason=f"Signal no soportada: {signal}",
+            latency_ms=self._elapsed_ms(started),
         )
 
     def _handle_buy(
@@ -232,7 +278,7 @@ class PaperTrader:
             drawdown_hoy=self.current_state().drawdown_pct,
             posiciones_abiertas=len(self.positions),
         )
-        risk_pct = self.order_notional_usd / max(equity, 1e-9)
+        risk_pct = (self.order_notional_usd * (settings.POSITION_STOP_LOSS_PCT / 100.0)) / max(equity, 1e-9)
         allowed, reason = self.guardian.check(
             {
                 "signal": "BUY",
@@ -314,21 +360,24 @@ class PaperTrader:
             latency_ms=self._elapsed_ms(started),
         )
 
-    def _handle_sell(
+    def _close_position(
         self,
         product_id: str,
+        signal: str,
         price: float,
         prob_buy: float,
         model_id: str,
         registry_key: str,
         timestamp_ms: int,
         started: float,
+        decision: str,
+        exit_reason: str,
     ) -> dict[str, Any]:
         position = self.positions.get(product_id)
         if position is None:
             return self._base_event(
                 product_id=product_id,
-                signal="SELL",
+                signal=signal,
                 decision="blocked_no_position",
                 prob_buy=prob_buy,
                 model_id=model_id,
@@ -352,22 +401,24 @@ class PaperTrader:
         self.sell_fills += 1
         state = self.current_state()
         logger.info(
-            "PaperTrader SELL filled. product_id={} qty={} fill_price={} realized_pnl={} cash={} equity={}",
+            "PaperTrader EXIT filled. product_id={} qty={} fill_price={} realized_pnl={} cash={} equity={} reason={}",
             product_id,
             round(position.quantity, 12),
             round(execution_price, 8),
             round(realized_pnl, 8),
             round(state.cash, 8),
             round(state.equity, 8),
+            exit_reason,
         )
         return self._base_event(
             product_id=product_id,
-            signal="SELL",
-            decision="paper_sell_filled",
+            signal=signal,
+            decision=decision,
             prob_buy=prob_buy,
             model_id=model_id,
             registry_key=registry_key,
             actionable=True,
+            reason=exit_reason,
             fill_price=round(execution_price, 8),
             quantity=round(position.quantity, 12),
             fee=round(fee, 8),

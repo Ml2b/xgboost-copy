@@ -42,8 +42,14 @@ class RiskGuardian:
         spread_pct = float(signal.get("spread_pct", 0.0))
         signal_ts_ms = int(signal.get("timestamp_ms", 0) or 0)
         signal_name = str(signal.get("signal", "BUY")).upper()
-        confidence = prob_buy if signal_name != "SELL" else (1.0 - prob_buy)
+        is_exit_signal = signal_name in {"SELL", "EXIT_LONG"}
 
+        # Los cierres protectivos no deben quedar bloqueados por la misma
+        # logica de entrada. Si ya existe posicion, priorizamos salir.
+        if is_exit_signal:
+            return True, "OK"
+
+        confidence = prob_buy
         if risk_pct > self.max_risk_per_trade:
             return False, "CAPITAL: riesgo por trade excedido"
         if portfolio.drawdown_hoy >= self.max_daily_drawdown:

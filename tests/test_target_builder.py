@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from target.builder import TargetBuilder, TargetConfig, TargetType
 from tests.helpers import make_synthetic_candles
 
@@ -21,12 +19,11 @@ def test_target_balance_stays_between_20_and_80_pct() -> None:
     assert 0.20 <= balance <= 0.80
 
 
-def test_target_config_raises_if_fee_exceeds_threshold() -> None:
-    with pytest.raises(ValueError):
-        TargetConfig(
-            target_type=TargetType.NET_RETURN_THRESHOLD,
-            horizon=5,
-            threshold_pct=0.05,
-            fee_pct=0.03,
-        )
-
+def test_target_threshold_pct_is_interpreted_as_net_threshold() -> None:
+    config = TargetConfig(
+        target_type=TargetType.NET_RETURN_THRESHOLD,
+        horizon=5,
+        threshold_pct=0.05,
+        fee_pct=0.03,
+    )
+    assert config.net_threshold_pct == 0.05

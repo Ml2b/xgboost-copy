@@ -41,8 +41,8 @@ def test_bootstrap_studied_universe_copies_promoted_and_candidate(tmp_path, monk
     btc_meta = json.loads((target_root / "btc_usdt" / "active_model_meta.json").read_text(encoding="utf-8"))
     xlm_meta = json.loads((target_root / "xlm_usd" / "active_model_meta.json").read_text(encoding="utf-8"))
 
-    assert Path(btc_meta["model_path"]).parent == target_root / "btc_usdt"
-    assert Path(xlm_meta["model_path"]).parent == target_root / "xlm_usd"
+    assert Path(btc_meta["model_path"]).name == "btc_model.json"
+    assert Path(xlm_meta["model_path"]).name == "xlm_model.json"
     assert (target_root / "xlm_usd" / "xlm_model.json").exists()
     assert manifest["assets"][0]["activation_source"] == "promoted"
     assert manifest["assets"][1]["activation_source"] == "candidate_latest"

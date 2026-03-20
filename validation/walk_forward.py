@@ -216,13 +216,16 @@ class WalkForwardValidator:
         sample_weight: np.ndarray | None = None,
     ) -> object:
         n_rows = len(df_wf)
-        split = max(1, int(n_rows * 0.85))
-        X_train = df_wf.iloc[:split][stable_features]
-        y_train = df_wf.iloc[:split][target_col].to_numpy(dtype=int)
-        X_val = df_wf.iloc[split:][stable_features]
-        y_val = df_wf.iloc[split:][target_col].to_numpy(dtype=int)
-        w_train = sample_weight[:split] if sample_weight is not None else None
-        w_val = sample_weight[split:] if sample_weight is not None else None
+        train_end, val_start = build_purged_train_validation_bounds(
+            n_rows,
+            self.config.gap_periods,
+        )
+        X_train = df_wf.iloc[:train_end][stable_features]
+        y_train = df_wf.iloc[:train_end][target_col].to_numpy(dtype=int)
+        X_val = df_wf.iloc[val_start:][stable_features]
+        y_val = df_wf.iloc[val_start:][target_col].to_numpy(dtype=int)
+        w_train = sample_weight[:train_end] if sample_weight is not None else None
+        w_val = sample_weight[val_start:] if sample_weight is not None else None
         if len(X_val) == 0 or len(np.unique(y_val)) < 2:
             X_val = X_train.iloc[-min(100, len(X_train)) :]
             y_val = y_train[-len(X_val) :]
@@ -299,3 +302,16 @@ def copy_selector_config(config: SelectorConfig) -> SelectorConfig:
         max_features=config.max_features,
         verbose=config.verbose,
     )
+
+
+def build_purged_train_validation_bounds(n_rows: int, gap_periods: int) -> tuple[int, int]:
+    """Construye un split final con purga temporal antes del bloque de validacion."""
+    if n_rows < 2:
+        return 1, 1
+
+    raw_split = max(1, int(n_rows * 0.85))
+    train_end = max(1, raw_split - max(0, gap_periods))
+    val_start = min(n_rows - 1, raw_split)
+    if val_start <= train_end:
+        val_start = min(n_rows - 1, train_end)
+    return train_end, val_start

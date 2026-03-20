@@ -34,7 +34,7 @@ class RegimeDecision:
 
 
 class InferenceEngine:
-    """Carga el modelo activo y emite senales BUY/SELL/HOLD."""
+    """Carga el modelo activo y emite senales BUY/EXIT_LONG/HOLD."""
 
     def __init__(
         self,
@@ -166,7 +166,7 @@ class InferenceEngine:
         if prob_buy >= buy_threshold:
             signal = "BUY"
         elif prob_buy <= sell_threshold:
-            signal = "SELL"
+            signal = "EXIT_LONG"
         if signal != "HOLD" and not regime.actionable:
             signal = "HOLD"
 
@@ -189,9 +189,11 @@ class InferenceEngine:
             "reason": reason,
             "registry_key": bundle.artifact.registry_key,
             "buy_threshold": round(buy_threshold, 6),
+            "exit_threshold": round(sell_threshold, 6),
             "sell_threshold": round(sell_threshold, 6),
             "regime": regime.regime,
             "regime_actionable": str(regime.actionable).lower(),
+            "signal_contract": settings.SIGNAL_CONTRACT,
         }
 
     def _predict_proba(self, model: object, frame: pd.DataFrame) -> np.ndarray:
@@ -381,9 +383,11 @@ class InferenceEngine:
             "reason": reason,
             "registry_key": registry_key,
             "buy_threshold": buy_threshold,
+            "exit_threshold": sell_threshold,
             "sell_threshold": sell_threshold,
             "regime": "no_model",
             "regime_actionable": "false",
+            "signal_contract": settings.SIGNAL_CONTRACT,
         }
 
     @staticmethod

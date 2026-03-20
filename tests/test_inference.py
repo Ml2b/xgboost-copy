@@ -34,13 +34,13 @@ class DummyProbModel:
         return [[1.0 - prob, prob]]
 
 
-def test_inference_returns_buy_sell_or_hold(tmp_path) -> None:
+def test_inference_returns_buy_exit_long_or_hold(tmp_path) -> None:
     model_path = tmp_path / "active.pkl"
     joblib.dump(DummyProbModel(), model_path)
     engine = InferenceEngine(DummyRegistry(str(model_path), ["f1", "f2"]))  # type: ignore[arg-type]
 
     assert engine.predict_signal({"f1": 0.9, "f2": 0.0})["signal"] == "BUY"
-    assert engine.predict_signal({"f1": 0.1, "f2": 0.0})["signal"] == "SELL"
+    assert engine.predict_signal({"f1": 0.1, "f2": 0.0})["signal"] == "EXIT_LONG"
     assert engine.predict_signal({"f1": 0.5, "f2": 0.0})["signal"] == "HOLD"
 
 
@@ -96,8 +96,9 @@ def test_inference_accepts_per_asset_threshold_overrides(tmp_path) -> None:
     hold_result = engine.predict_signal({"product_id": "ZEC-USD", "f1": 0.24})
 
     assert sell_result is not None
-    assert sell_result["signal"] == "SELL"
+    assert sell_result["signal"] == "EXIT_LONG"
     assert sell_result["sell_threshold"] == 0.2
+    assert sell_result["signal_contract"] == "long_only_v2"
 
     assert hold_result is not None
     assert hold_result["signal"] == "HOLD"

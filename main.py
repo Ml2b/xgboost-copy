@@ -196,6 +196,12 @@ class DiagnosticsServer:
             "max_spread_pct": settings.MAX_SPREAD_PCT,
             "max_daily_drawdown": settings.MAX_DAILY_DRAWDOWN,
             "pilot_order_notional_usd": settings.PILOT_ORDER_NOTIONAL_USD,
+            "position_stop_loss_pct": settings.POSITION_STOP_LOSS_PCT,
+            "position_take_profit_pct": settings.POSITION_TAKE_PROFIT_PCT,
+            "position_max_hold_minutes": settings.POSITION_MAX_HOLD_MINUTES,
+            "min_model_auc": settings.MIN_MODEL_AUC,
+            "min_model_sharpe_for_promotion": settings.MIN_MODEL_SHARPE_FOR_PROMOTION,
+            "max_model_drawdown_for_promotion": settings.MAX_MODEL_DRAWDOWN_FOR_PROMOTION,
         }
         try:
             mem = Path("/proc/meminfo").read_text()
@@ -385,7 +391,7 @@ class DiagnosticsServer:
                     last_equity = float(row["equity"])
                     last_cash = float(row["cash"])
                     last_drawdown = float(row["drawdown_pct"])
-            elif decision == "paper_sell_filled":
+            elif decision in {"paper_exit_signal_filled", "paper_exit_rule_filled", "paper_sell_filled"}:
                 sell_fills += 1
                 fills_by_asset[asset] += 1
                 with contextlib.suppress(Exception):

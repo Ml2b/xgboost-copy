@@ -87,7 +87,7 @@ def test_order_manager_blocks_sell_without_inventory() -> None:
         event = await manager.handle_signal(
             {
                 "product_id": "BTC-USD",
-                "signal": "SELL",
+                "signal": "EXIT_LONG",
                 "prob_buy": 0.1,
                 "model_id": "m1",
                 "registry_key": "btc_usdt",
@@ -114,7 +114,7 @@ def test_order_manager_accepts_sell_close_when_inventory_exists() -> None:
         event = await manager.handle_signal(
             {
                 "product_id": "BTC-USD",
-                "signal": "SELL",
+                "signal": "EXIT_LONG",
                 "prob_buy": 0.1,
                 "model_id": "m1",
                 "registry_key": "btc_usdt",
@@ -124,6 +124,92 @@ def test_order_manager_accepts_sell_close_when_inventory_exists() -> None:
 
         assert event["decision"] == "accepted_dry_run"
         assert event["order_payload"]["side"] == "SELL"
+        assert event["signal"] == "EXIT_LONG"
+
+    asyncio.run(run())
+
+
+def test_order_manager_can_close_dry_run_position_without_real_inventory() -> None:
+    async def run() -> None:
+        redis_client = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        manager = OrderManager(
+            redis_client=redis_client,
+            coinbase_client=DummyCoinbaseClient({"USD": Decimal("10000"), "BTC": Decimal("0")}),
+            execution_enabled=True,
+            dry_run=True,
+            order_notional_usd=25,
+            allowed_bases=["BTC"],
+        )
+        await manager.handle_signal(
+            {
+                "product_id": "BTC-USD",
+                "signal": "BUY",
+                "prob_buy": 0.9,
+                "model_id": "m1",
+                "registry_key": "btc_usdt",
+                "actionable": "true",
+            }
+        )
+        event = await manager.handle_signal(
+            {
+                "product_id": "BTC-USD",
+                "signal": "EXIT_LONG",
+                "prob_buy": 0.1,
+                "model_id": "m1",
+                "registry_key": "btc_usdt",
+                "actionable": "true",
+            }
+        )
+
+        assert event["decision"] == "accepted_dry_run"
+        assert event["signal"] == "EXIT_LONG"
+
+    asyncio.run(run())
+
+
+def test_order_manager_restores_managed_position_from_redis_state() -> None:
+    async def run() -> None:
+        redis_client = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        first_manager = OrderManager(
+            redis_client=redis_client,
+            coinbase_client=DummyCoinbaseClient({"USD": Decimal("10000"), "BTC": Decimal("0")}),
+            execution_enabled=True,
+            dry_run=True,
+            order_notional_usd=25,
+            allowed_bases=["BTC"],
+        )
+        await first_manager.handle_signal(
+            {
+                "product_id": "BTC-USD",
+                "signal": "BUY",
+                "prob_buy": 0.9,
+                "model_id": "m1",
+                "registry_key": "btc_usdt",
+                "actionable": "true",
+            }
+        )
+
+        second_manager = OrderManager(
+            redis_client=redis_client,
+            coinbase_client=DummyCoinbaseClient({"USD": Decimal("10000"), "BTC": Decimal("0")}),
+            execution_enabled=True,
+            dry_run=True,
+            order_notional_usd=25,
+            allowed_bases=["BTC"],
+        )
+        event = await second_manager.handle_signal(
+            {
+                "product_id": "BTC-USD",
+                "signal": "EXIT_LONG",
+                "prob_buy": 0.1,
+                "model_id": "m1",
+                "registry_key": "btc_usdt",
+                "actionable": "true",
+            }
+        )
+
+        assert event["decision"] == "accepted_dry_run"
+        assert event["signal"] == "EXIT_LONG"
 
     asyncio.run(run())
 

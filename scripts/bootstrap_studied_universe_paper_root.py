@@ -143,7 +143,7 @@ def _normalize_registry_paths(asset_dir: Path, final_asset_dir: Path) -> list[An
 
     serialized_records: list[dict[str, Any]] = []
     for record in records:
-        local_model_path = str(final_asset_dir / Path(record.model_path).name)
+        local_model_path = Path(record.model_path).name
         payload = {
             "model_id": record.model_id,
             "model_path": local_model_path,
@@ -179,7 +179,7 @@ def _ensure_active_meta(asset_dir: Path, final_asset_dir: Path, records: list[An
 
     if active_meta_path.exists():
         active_meta = json.loads(active_meta_path.read_text(encoding="utf-8"))
-        active_meta["model_path"] = str(final_asset_dir / Path(str(active_meta.get("model_path", ""))).name)
+        active_meta["model_path"] = Path(str(active_meta.get("model_path", ""))).name
         active_meta_path.write_text(json.dumps(active_meta, indent=2), encoding="utf-8")
         return activation_source
 
@@ -188,7 +188,7 @@ def _ensure_active_meta(asset_dir: Path, final_asset_dir: Path, records: list[An
         json.dumps(
             {
                 "model_id": latest.model_id,
-                "model_path": str(final_asset_dir / Path(latest.model_path).name),
+                "model_path": Path(latest.model_path).name,
                 "feature_names": list(latest.feature_names),
             },
             indent=2,

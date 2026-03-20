@@ -5,12 +5,67 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import hashlib
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
 from config import settings
+
+
+def _looks_like_windows_absolute_path(raw_path: str) -> bool:
+    """Detecta paths estilo Windows incluso en runtimes Linux."""
+    return len(raw_path) >= 3 and raw_path[1] == ":" and raw_path[2] in ("\\", "/")
+
+
+def _serialize_model_reference(base_dir: Path, model_path: Path) -> str:
+    """Guarda rutas relativas al registry para hacer portable el artefacto."""
+    try:
+        return model_path.relative_to(base_dir).as_posix()
+    except ValueError:
+        return model_path.name
+
+
+def resolve_model_artifact_path(base_dir: Path, stored_path: str | None) -> Path | None:
+    """Resuelve rutas relativas y recupera artefactos serializados en otro SO."""
+    raw_path = str(stored_path or "").strip()
+    if not raw_path:
+        return None
+
+    normalized = raw_path.replace("\\", "/")
+    native_path = Path(raw_path)
+    if native_path.is_absolute() and native_path.exists():
+        return native_path
+
+    normalized_path = Path(normalized)
+    if not _looks_like_windows_absolute_path(normalized):
+        relative_candidate = base_dir / normalized_path
+        if relative_candidate.exists():
+            return relative_candidate
+
+    basename = normalized_path.name
+    if basename:
+        basename_candidate = base_dir / basename
+        if basename_candidate.exists():
+            return basename_candidate
+
+    if not _looks_like_windows_absolute_path(normalized):
+        return base_dir / normalized_path
+    if basename:
+        return base_dir / basename
+    return None
+
+
+def compute_artifact_sha256(model_path: Path | None) -> str:
+    """Calcula un fingerprint estable del artefacto para detectar desalineaciones."""
+    if model_path is None or not model_path.exists():
+        return ""
+    digest = hashlib.sha256()
+    with model_path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65_536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 @dataclass(slots=True)
@@ -81,7 +136,7 @@ class ModelRegistry:
 
         record = ModelRecord(
             model_id=model_id,
-            model_path=str(model_path),
+            model_path=_serialize_model_reference(self.base_dir, model_path),
             created_at=datetime.now(tz=timezone.utc).isoformat(),
             train_start=fechas["train_start"],
             train_end=fechas["train_end"],
@@ -100,7 +155,7 @@ class ModelRegistry:
 
     def try_promote(self, record: ModelRecord) -> bool:
         """Promueve si supera el minimo y mejora al activo."""
-        if record.metrics.auc_val < settings.MIN_MODEL_AUC:
+        if not self._passes_promotion_floor(record):
             return False
 
         active = self._get_active_record()
@@ -108,8 +163,13 @@ class ModelRegistry:
             return self._promote(record)
 
         auc_improvement = record.metrics.auc_val - active.metrics.auc_val
-        sharpe_ok = record.metrics.sharpe >= max(0.1, active.metrics.sharpe)
-        if auc_improvement >= 0.005 and sharpe_ok:
+        sharpe_ok = record.metrics.sharpe >= max(settings.MIN_MODEL_SHARPE_FOR_PROMOTION, active.metrics.sharpe)
+        drawdown_ok = record.metrics.max_drawdown <= settings.MAX_MODEL_DRAWDOWN_FOR_PROMOTION
+        if (
+            auc_improvement >= settings.MIN_MODEL_AUC_IMPROVEMENT
+            and sharpe_ok
+            and drawdown_ok
+        ):
             return self._promote(record)
         return False
 
@@ -138,6 +198,10 @@ class ModelRegistry:
             )
 
     def _promote(self, record: ModelRecord) -> bool:
+        source = resolve_model_artifact_path(self.base_dir, record.model_path)
+        if source is None or not source.exists():
+            return False
+
         records = self._load_records()
         updated_records: list[ModelRecord] = []
         for existing in records:
@@ -157,8 +221,6 @@ class ModelRegistry:
                 )
             )
         self._write_registry(updated_records)
-
-        source = Path(record.model_path)
         active_path = self.base_dir / f"active_model{source.suffix}"
         shutil.copyfile(source, active_path)
         self._atomic_write_text(
@@ -166,8 +228,10 @@ class ModelRegistry:
             json.dumps(
                 {
                     "model_id": record.model_id,
-                    "model_path": str(active_path),
+                    "model_path": _serialize_model_reference(self.base_dir, active_path),
                     "feature_names": record.feature_names,
+                    "signal_contract": settings.SIGNAL_CONTRACT,
+                    "artifact_sha256": compute_artifact_sha256(active_path),
                 },
                 indent=2,
             ),
@@ -179,9 +243,13 @@ class ModelRegistry:
             if record.promoted:
                 if self.active_meta_path.exists():
                     meta = json.loads(self.active_meta_path.read_text(encoding="utf-8"))
+                    resolved_path = resolve_model_artifact_path(
+                        self.base_dir,
+                        meta.get("model_path", record.model_path),
+                    )
                     record = ModelRecord(
                         model_id=record.model_id,
-                        model_path=meta.get("model_path", record.model_path),
+                        model_path=str(resolved_path) if resolved_path is not None else record.model_path,
                         created_at=record.created_at,
                         train_start=record.train_start,
                         train_end=record.train_end,
@@ -192,8 +260,31 @@ class ModelRegistry:
                         feature_names=meta.get("feature_names", record.feature_names),
                         n_features=len(meta.get("feature_names", record.feature_names)),
                     )
+                else:
+                    resolved_path = resolve_model_artifact_path(self.base_dir, record.model_path)
+                    record = ModelRecord(
+                        model_id=record.model_id,
+                        model_path=str(resolved_path) if resolved_path is not None else record.model_path,
+                        created_at=record.created_at,
+                        train_start=record.train_start,
+                        train_end=record.train_end,
+                        val_start=record.val_start,
+                        val_end=record.val_end,
+                        metrics=record.metrics,
+                        promoted=True,
+                        feature_names=record.feature_names,
+                        n_features=record.n_features,
+                    )
                 return record
         return None
+
+    def _passes_promotion_floor(self, record: ModelRecord) -> bool:
+        """Evita promociones por AUC aislada con perfil de trading debil."""
+        return (
+            record.metrics.auc_val >= settings.MIN_MODEL_AUC
+            and record.metrics.sharpe >= settings.MIN_MODEL_SHARPE_FOR_PROMOTION
+            and record.metrics.max_drawdown <= settings.MAX_MODEL_DRAWDOWN_FOR_PROMOTION
+        )
 
     def _load_records(self) -> list[ModelRecord]:
         return self.load_records_from_path(self.registry_path)
@@ -314,31 +405,51 @@ class MultiAssetModelRegistry:
 
         if active_meta_path.exists():
             meta = self._safe_read_json(active_meta_path)
-            model_path = str(asset_dir / Path(str(meta.get("model_path", ""))).name)
+            resolved_path = resolve_model_artifact_path(asset_dir, str(meta.get("model_path", "")))
             feature_names = list(meta.get("feature_names", []))
             model_id = str(meta.get("model_id", ""))
-            fingerprint = self._fingerprint_for_paths([active_meta_path, Path(model_path)])
+            path_exists = resolved_path is not None and resolved_path.exists()
+            meta_valid = bool(path_exists and feature_names and model_id)
+            expected_sha256 = str(meta.get("artifact_sha256", "")).strip()
+            hash_ok = True
+            if path_exists and expected_sha256:
+                hash_ok = compute_artifact_sha256(resolved_path) == expected_sha256
+            fingerprint = self._fingerprint_for_paths(
+                [active_meta_path] + ([resolved_path] if resolved_path is not None else [])
+            )
+            if not path_exists:
+                reason = "broken_model_path"
+            elif not hash_ok:
+                reason = "artifact_hash_mismatch"
+            elif not feature_names:
+                reason = "invalid_active_meta"
+            elif base_asset not in self.execution_allowed_bases:
+                reason = "base_not_enabled"
+            else:
+                reason = "ok"
             return ResolvedModelArtifact(
                 registry_key=registry_key,
                 base_asset=base_asset,
                 model_id=model_id,
-                model_path=model_path,
+                model_path=str(resolved_path) if resolved_path is not None else None,
                 feature_names=feature_names,
-                actionable=base_asset in self.execution_allowed_bases and Path(model_path).exists(),
-                reason="ok" if base_asset in self.execution_allowed_bases else "base_not_enabled",
+                actionable=meta_valid and hash_ok and base_asset in self.execution_allowed_bases,
+                reason=reason,
                 fingerprint=fingerprint,
             )
 
         records = ModelRegistry.load_records_from_path(registry_path)
         if records:
             latest = records[-1]
-            model_path = str(Path(latest.model_path))
-            fingerprint = self._fingerprint_for_paths([registry_path, Path(model_path)])
+            resolved_path = resolve_model_artifact_path(asset_dir, latest.model_path)
+            fingerprint = self._fingerprint_for_paths(
+                [registry_path] + ([resolved_path] if resolved_path is not None else [])
+            )
             return ResolvedModelArtifact(
                 registry_key=registry_key,
                 base_asset=base_asset,
                 model_id=latest.model_id,
-                model_path=model_path if Path(model_path).exists() else None,
+                model_path=str(resolved_path) if resolved_path is not None and resolved_path.exists() else None,
                 feature_names=list(latest.feature_names),
                 actionable=False,
                 reason="no_promoted_model",

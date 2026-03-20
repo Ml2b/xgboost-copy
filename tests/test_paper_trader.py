@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fakeredis.aioredis
 
+from execution.position_exit import PositionExitPolicy
 from paper.paper_trader import PaperTrader
 
 
@@ -41,6 +42,7 @@ def test_paper_trader_sells_and_realizes_pnl() -> None:
         order_notional_usd=100,
         fee_pct=0.0,
         slippage_pct=0.0,
+        exit_policy=PositionExitPolicy(stop_loss_pct=50.0, take_profit_pct=50.0, max_hold_minutes=10_000),
     )
     trader.handle_candle({"product_id": "BTC-USD", "close": "100"})
     trader.handle_signal(
@@ -57,7 +59,7 @@ def test_paper_trader_sells_and_realizes_pnl() -> None:
     event = trader.handle_signal(
         {
             "product_id": "BTC-USD",
-            "signal": "SELL",
+            "signal": "EXIT_LONG",
             "prob_buy": 0.1,
             "model_id": "m1",
             "registry_key": "btc_usdt",
@@ -66,7 +68,7 @@ def test_paper_trader_sells_and_realizes_pnl() -> None:
     )
 
     state = trader.current_state()
-    assert event["decision"] == "paper_sell_filled"
+    assert event["decision"] == "paper_exit_signal_filled"
     assert round(event["realized_pnl"], 6) == 10.0
     assert state.open_positions == 0
     assert round(state.cash, 6) == 20010.0
@@ -131,3 +133,30 @@ def test_paper_trader_applies_per_asset_slippage_override() -> None:
     assert event["decision"] == "paper_buy_filled"
     assert event["applied_slippage_pct"] == 2.0
     assert round(event["fill_price"], 6) == 10.2
+
+
+def test_paper_trader_forces_exit_on_take_profit_rule() -> None:
+    trader = PaperTrader(
+        redis_client=fakeredis.aioredis.FakeRedis(decode_responses=True),
+        initial_cash=20000,
+        order_notional_usd=100,
+        fee_pct=0.0,
+        slippage_pct=0.0,
+        exit_policy=PositionExitPolicy(stop_loss_pct=1.0, take_profit_pct=5.0, max_hold_minutes=120),
+    )
+    trader.handle_candle({"product_id": "BTC-USD", "close": "100", "close_time": "1000"})
+    trader.handle_signal(
+        {
+            "product_id": "BTC-USD",
+            "signal": "BUY",
+            "prob_buy": 0.9,
+            "model_id": "m1",
+            "registry_key": "btc_usdt",
+            "actionable": "true",
+        }
+    )
+    event = trader.handle_candle({"product_id": "BTC-USD", "close": "106", "close_time": "61000"})
+
+    assert event is not None
+    assert event["decision"] == "paper_exit_rule_filled"
+    assert event["reason"] == "take_profit_hit"

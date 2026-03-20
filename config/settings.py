@@ -56,6 +56,7 @@ STREAM_MARKET_FEATURES: Final[str] = "market.features"
 STREAM_INFERENCE_SIGNALS: Final[str] = "inference.signals"
 STREAM_EXECUTION_EVENTS: Final[str] = "execution.events"
 STREAM_PAPER_EXECUTION_EVENTS: Final[str] = "paper.execution.events"
+EXECUTION_STATE_KEY: Final[str] = "execution.managed_positions"
 STREAM_SYSTEM_HEALTH: Final[str] = "system.health"
 STREAM_SYSTEM_ERRORS: Final[str] = "system.errors"
 
@@ -163,6 +164,9 @@ COINBASE_QUOTE_PRIORITY: Final[list[str]] = [
 MAX_RISK_PER_TRADE: Final[float] = float(os.getenv("MAX_RISK_PER_TRADE", "0.01"))
 MAX_DAILY_DRAWDOWN: Final[float] = float(os.getenv("MAX_DAILY_DRAWDOWN", "0.02"))
 MAX_SPREAD_PCT: Final[float] = float(os.getenv("MAX_SPREAD_PCT", "0.0025"))
+POSITION_STOP_LOSS_PCT: Final[float] = float(os.getenv("POSITION_STOP_LOSS_PCT", "1.0"))
+POSITION_TAKE_PROFIT_PCT: Final[float] = float(os.getenv("POSITION_TAKE_PROFIT_PCT", "1.5"))
+POSITION_MAX_HOLD_MINUTES: Final[int] = int(os.getenv("POSITION_MAX_HOLD_MINUTES", "60"))
 
 # XGBoost
 XGB_PARAMS: Final[dict[str, object]] = {
@@ -190,8 +194,18 @@ FEE_PCT: Final[float] = 0.05
 # Reentrenamiento y senales
 RETRAIN_INTERVAL: Final[int] = 2 * 3600
 MIN_MODEL_AUC: Final[float] = 0.53
+MIN_MODEL_SHARPE_FOR_PROMOTION: Final[float] = float(
+    os.getenv("MIN_MODEL_SHARPE_FOR_PROMOTION", "0.1")
+)
+MAX_MODEL_DRAWDOWN_FOR_PROMOTION: Final[float] = float(
+    os.getenv("MAX_MODEL_DRAWDOWN_FOR_PROMOTION", "0.20")
+)
+MIN_MODEL_AUC_IMPROVEMENT: Final[float] = float(
+    os.getenv("MIN_MODEL_AUC_IMPROVEMENT", "0.005")
+)
 MIN_SIGNAL_PROB: Final[float] = 0.62
 MODEL_RELOAD_INTERVAL: Final[int] = 30
+SIGNAL_CONTRACT: Final[str] = os.getenv("SIGNAL_CONTRACT", "long_only_v2")
 REGIME_GATE_ENABLED: Final[bool] = os.getenv("REGIME_GATE_ENABLED", "true").lower() == "true"
 REGIME_VOL_EXTREME_MAX: Final[float] = float(os.getenv("REGIME_VOL_EXTREME_MAX", "0.006"))
 REGIME_RANGE_COMPRESSION_MIN: Final[float] = float(

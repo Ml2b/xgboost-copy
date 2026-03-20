@@ -30,6 +30,18 @@ def test_first_model_is_promoted_if_it_passes_minimum(tmp_path) -> None:
     assert registry.has_active_model() is True
 
 
+def test_first_model_is_not_promoted_with_negative_sharpe(tmp_path) -> None:
+    registry = ModelRegistry(base_dir=tmp_path)
+    record = registry.register(
+        model=DummyModel("first"),
+        metrics=ModelMetrics(auc_val=0.60, sharpe=-0.1, precision_buy=0.6, win_rate=0.55, max_drawdown=0.1),
+        fechas={"train_start": "a", "train_end": "b", "val_start": "c", "val_end": "d"},
+        feature_names=["f1", "f2"],
+    )
+    assert registry.try_promote(record) is False
+    assert registry.has_active_model() is False
+
+
 def test_worse_model_does_not_replace_active_one(tmp_path) -> None:
     registry = ModelRegistry(base_dir=tmp_path)
     first = registry.register(
@@ -112,6 +124,31 @@ def test_multi_asset_registry_resolves_by_base_and_observation_state(tmp_path) -
     assert sol.registry_key == "sol_usdt"
     assert sol.actionable is False
     assert sol.reason == "no_promoted_model"
+
+
+def test_multi_asset_registry_recovers_windows_style_active_path(tmp_path) -> None:
+    btc_dir = tmp_path / "btc_usdt"
+    btc_dir.mkdir()
+    (btc_dir / "model_btc.json").write_text("{}", encoding="utf-8")
+    (btc_dir / "active_model_meta.json").write_text(
+        json.dumps(
+            {
+                "model_id": "model_btc",
+                "model_path": "C:\\\\models\\\\trained\\\\model_btc.json",
+                "feature_names": ["f1", "f2"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    registry = MultiAssetModelRegistry(root_dir=tmp_path, execution_allowed_bases=["BTC"])
+    artifact = registry.resolve_artifact("BTC-USD")
+
+    assert artifact is not None
+    assert artifact.actionable is True
+    assert artifact.reason == "ok"
+    assert artifact.model_path is not None
+    assert Path(artifact.model_path).name == "model_btc.json"
 
 
 def test_multi_asset_registry_tracks_placeholder_assets_without_model(tmp_path) -> None:
