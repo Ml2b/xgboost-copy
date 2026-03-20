@@ -179,8 +179,12 @@ class OrderManager:
             )
 
         try:
-            balances = self.coinbase_client.get_account_balances()
-            best_bid_ask = self.coinbase_client.get_best_bid_ask(product_id)
+            if self.dry_run:
+                balances: dict = {}
+                best_bid_ask = self.coinbase_client.get_best_bid_ask(product_id, prefer_private=False)
+            else:
+                balances = self.coinbase_client.get_account_balances()
+                best_bid_ask = self.coinbase_client.get_best_bid_ask(product_id)
             product = self.coinbase_client.get_product_snapshot(product_id)
         except Exception as exc:
             self.stats.rejected += 1
