@@ -131,6 +131,20 @@ class OrderManager:
         model_id = str(payload.get("model_id", ""))
         managed_position = self._managed_positions.get(product_id)
 
+        if signal == "EXIT_LONG" and managed_position is None:
+            return self._base_event(
+                product_id=product_id,
+                signal=signal,
+                decision="ignored_no_position",
+                prob_buy=prob_buy,
+                model_id=model_id,
+                registry_key=registry_key,
+                actionable=False,
+                reason="no_managed_position",
+                dry_run=self.dry_run,
+                latency_ms=self._elapsed_ms(started),
+            )
+
         if signal == "HOLD" and managed_position is None:
             return self._base_event(
                 product_id=product_id,
@@ -187,8 +201,17 @@ class OrderManager:
 
         try:
             if self.dry_run:
-                balances: dict = {}
-                best_bid_ask = self.coinbase_client.get_best_bid_ask(product_id, prefer_private=False)
+                try:
+                    balances = self.coinbase_client.get_account_balances()
+                except Exception:
+                    balances = {}
+                try:
+                    best_bid_ask = self.coinbase_client.get_best_bid_ask(
+                        product_id,
+                        prefer_private=False,
+                    )
+                except TypeError:
+                    best_bid_ask = self.coinbase_client.get_best_bid_ask(product_id)
             else:
                 balances = self.coinbase_client.get_account_balances()
                 best_bid_ask = self.coinbase_client.get_best_bid_ask(product_id)

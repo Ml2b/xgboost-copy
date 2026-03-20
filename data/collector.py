@@ -30,13 +30,12 @@ class CollectorStats:
     reconciled_candles: int = 0
     lag_ms_total: float = 0.0
     lag_samples: int = 0
+    lag_ema_ms: float = 0.0
 
     @property
     def avg_lag_ms(self) -> float:
-        """Promedio de lag medido en milisegundos."""
-        if self.lag_samples == 0:
-            return 0.0
-        return self.lag_ms_total / self.lag_samples
+        """EMA del lag reciente en milisegundos (alpha=0.001, ~700 muestras)."""
+        return self.lag_ema_ms
 
 
 class CollectorWithCandles:
@@ -152,6 +151,7 @@ class CollectorWithCandles:
         import websockets
 
         connection_key = self._connection_key(products)
+        self._last_heartbeat_counter_by_connection.pop(connection_key, None)
         async with websockets.connect(self.websocket_url, ping_interval=20, ping_timeout=20) as websocket:
             logger.info(
                 "Collector websocket conectado. connection_key={} products={} auth={}",
@@ -186,9 +186,14 @@ class CollectorWithCandles:
             size = float(trade["size"])
             ts_ms = int(trade["ts_ms"])
             now_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
+            lag_ms = max(0, now_ms - ts_ms)
             self.stats.trades_received += 1
-            self.stats.lag_ms_total += max(0, now_ms - ts_ms)
+            self.stats.lag_ms_total += lag_ms
             self.stats.lag_samples += 1
+            if self.stats.lag_samples == 1:
+                self.stats.lag_ema_ms = lag_ms
+            else:
+                self.stats.lag_ema_ms = 0.001 * lag_ms + 0.999 * self.stats.lag_ema_ms
 
             await self._publish_stream(settings.STREAM_MARKET_TRADES_RAW, trade)
             candle = self.candle_builder.add_trade(product_id, price, size, ts_ms)
