@@ -97,13 +97,20 @@ class PaperTrader:
     async def _consume_candles(self, stop_event: asyncio.Event) -> None:
         await self._ensure_group(settings.STREAM_MARKET_CANDLES_1M, "paper-trader-candles")
         while not stop_event.is_set():
-            messages = await self.redis_client.xreadgroup(
-                groupname="paper-trader-candles",
-                consumername="paper-candles-1",
-                streams={settings.STREAM_MARKET_CANDLES_1M: ">"},
-                count=50,
-                block=1000,
-            )
+            try:
+                messages = await self.redis_client.xreadgroup(
+                    groupname="paper-trader-candles",
+                    consumername="paper-candles-1",
+                    streams={settings.STREAM_MARKET_CANDLES_1M: ">"},
+                    count=50,
+                    block=1000,
+                )
+            except Exception as exc:
+                if "NOGROUP" in str(exc):
+                    logger.warning("PaperTrader candles: NOGROUP detectado, recreando consumer group")
+                    await self._ensure_group(settings.STREAM_MARKET_CANDLES_1M, "paper-trader-candles")
+                    continue
+                raise
             for _, stream_messages in messages:
                 for message_id, payload in stream_messages:
                     event = self.handle_candle(payload)
@@ -114,13 +121,20 @@ class PaperTrader:
     async def _consume_signals(self, stop_event: asyncio.Event) -> None:
         await self._ensure_group(settings.STREAM_INFERENCE_SIGNALS, "paper-trader-signals")
         while not stop_event.is_set():
-            messages = await self.redis_client.xreadgroup(
-                groupname="paper-trader-signals",
-                consumername="paper-signals-1",
-                streams={settings.STREAM_INFERENCE_SIGNALS: ">"},
-                count=50,
-                block=1000,
-            )
+            try:
+                messages = await self.redis_client.xreadgroup(
+                    groupname="paper-trader-signals",
+                    consumername="paper-signals-1",
+                    streams={settings.STREAM_INFERENCE_SIGNALS: ">"},
+                    count=50,
+                    block=1000,
+                )
+            except Exception as exc:
+                if "NOGROUP" in str(exc):
+                    logger.warning("PaperTrader signals: NOGROUP detectado, recreando consumer group")
+                    await self._ensure_group(settings.STREAM_INFERENCE_SIGNALS, "paper-trader-signals")
+                    continue
+                raise
             for _, stream_messages in messages:
                 for message_id, payload in stream_messages:
                     event = self.handle_signal(payload)

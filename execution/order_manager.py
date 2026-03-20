@@ -87,13 +87,20 @@ class OrderManager:
         await self._ensure_state_loaded()
         await self._ensure_group(settings.STREAM_INFERENCE_SIGNALS, "order-manager")
         while not stop_event.is_set():
-            messages = await self.redis_client.xreadgroup(
-                groupname="order-manager",
-                consumername="order-manager-1",
-                streams={settings.STREAM_INFERENCE_SIGNALS: ">"},
-                count=25,
-                block=1000,
-            )
+            try:
+                messages = await self.redis_client.xreadgroup(
+                    groupname="order-manager",
+                    consumername="order-manager-1",
+                    streams={settings.STREAM_INFERENCE_SIGNALS: ">"},
+                    count=25,
+                    block=1000,
+                )
+            except Exception as exc:
+                if "NOGROUP" in str(exc):
+                    logger.warning("OrderManager: NOGROUP detectado, recreando consumer group")
+                    await self._ensure_group(settings.STREAM_INFERENCE_SIGNALS, "order-manager")
+                    continue
+                raise
             for _, stream_messages in messages:
                 for message_id, payload in stream_messages:
                     event = await self.handle_signal(payload)

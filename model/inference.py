@@ -112,13 +112,20 @@ class InferenceEngine:
                 return
             await self._ensure_group(settings.STREAM_MARKET_FEATURES, "inference-engine")
             while not stop_event.is_set():
-                messages = await self.redis_client.xreadgroup(
-                    groupname="inference-engine",
-                    consumername="inference-1",
-                    streams={settings.STREAM_MARKET_FEATURES: ">"},
-                    count=25,
-                    block=1000,
-                )
+                try:
+                    messages = await self.redis_client.xreadgroup(
+                        groupname="inference-engine",
+                        consumername="inference-1",
+                        streams={settings.STREAM_MARKET_FEATURES: ">"},
+                        count=25,
+                        block=1000,
+                    )
+                except Exception as exc:
+                    if "NOGROUP" in str(exc):
+                        logger.warning("InferenceEngine: NOGROUP detectado, recreando consumer group")
+                        await self._ensure_group(settings.STREAM_MARKET_FEATURES, "inference-engine")
+                        continue
+                    raise
                 for _, stream_messages in messages:
                     for message_id, payload in stream_messages:
                         result = self.predict_signal(payload)

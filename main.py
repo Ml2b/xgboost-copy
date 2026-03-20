@@ -45,13 +45,20 @@ class FeatureEngine:
         logger.info("FeatureEngine iniciado. buffer_size={}", settings.FEATURE_BUFFER_SIZE)
         await self._ensure_group(settings.STREAM_MARKET_CANDLES_1M, "feature-engine")
         while not stop_event.is_set():
-            messages = await self.redis_client.xreadgroup(
-                groupname="feature-engine",
-                consumername="feature-1",
-                streams={settings.STREAM_MARKET_CANDLES_1M: ">"},
-                count=25,
-                block=1000,
-            )
+            try:
+                messages = await self.redis_client.xreadgroup(
+                    groupname="feature-engine",
+                    consumername="feature-1",
+                    streams={settings.STREAM_MARKET_CANDLES_1M: ">"},
+                    count=25,
+                    block=1000,
+                )
+            except Exception as exc:
+                if "NOGROUP" in str(exc):
+                    logger.warning("FeatureEngine: NOGROUP detectado, recreando consumer group")
+                    await self._ensure_group(settings.STREAM_MARKET_CANDLES_1M, "feature-engine")
+                    continue
+                raise
             for _, stream_messages in messages:
                 for message_id, payload in stream_messages:
                     await self._process_candle(payload)
