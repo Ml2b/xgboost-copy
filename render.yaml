@@ -54,6 +54,12 @@ services:
         value: "0.05"
       - key: PILOT_ORDER_NOTIONAL_USD
         value: "50"
+      - key: SELECTIVE_PROMOTION_MIN_AUC
+        value: "0.48"
+      - key: SELECTIVE_PROMOTION_MIN_PRECISION
+        value: "0.60"
+      - key: SELECTIVE_PROMOTION_MAX_DRAWDOWN
+        value: "0.10"
 
   - type: keyvalue
     name: xgboost-redis
