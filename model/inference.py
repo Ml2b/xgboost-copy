@@ -126,6 +126,8 @@ class InferenceEngine:
                             await self.redis_client.xadd(
                                 settings.STREAM_INFERENCE_SIGNALS,
                                 {key: str(value) for key, value in result.items()},
+                                maxlen=50000,
+                                approximate=True,
                             )
                             self.total_signals += int(result["signal"] != "HOLD")
                         await self.redis_client.xack(settings.STREAM_MARKET_FEATURES, "inference-engine", message_id)

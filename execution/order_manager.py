@@ -622,7 +622,7 @@ class OrderManager:
             key: json.dumps(value) if isinstance(value, (dict, list)) else str(value)
             for key, value in payload.items()
         }
-        await self.redis_client.xadd(settings.STREAM_EXECUTION_EVENTS, mapping)
+        await self.redis_client.xadd(settings.STREAM_EXECUTION_EVENTS, mapping, maxlen=50000, approximate=True)
 
     async def _ensure_group(self, stream: str, group_name: str) -> None:
         try:

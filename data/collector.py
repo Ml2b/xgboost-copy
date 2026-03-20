@@ -479,7 +479,7 @@ class CollectorWithCandles:
         if self.redis_client is None:
             return
         mapping = {key: json.dumps(value) if isinstance(value, (dict, list)) else str(value) for key, value in payload.items()}
-        await self.redis_client.xadd(stream, mapping)
+        await self.redis_client.xadd(stream, mapping, maxlen=10000, approximate=True)
 
     @staticmethod
     def _parse_time_to_ms(value: Any) -> int:

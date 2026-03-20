@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import inspect
 import time
 from dataclasses import dataclass
@@ -433,6 +434,8 @@ class MultiAssetTrainerService:
                 retrain_interval=self.retrain_interval,
             )
             result = trainer._retrain_cycle()
+            del trainer
+            gc.collect()
             if result.status == "trained":
                 trained_assets += 1
             if result.promoted:

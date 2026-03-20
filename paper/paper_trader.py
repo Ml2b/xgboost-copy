@@ -456,6 +456,8 @@ class PaperTrader:
         await self.redis_client.xadd(
             settings.STREAM_PAPER_EXECUTION_EVENTS,
             {key: str(value) for key, value in payload.items()},
+            maxlen=50000,
+            approximate=True,
         )
 
     async def _ensure_group(self, stream: str, group_name: str) -> None:
