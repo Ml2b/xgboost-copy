@@ -147,7 +147,11 @@ class DiagnosticsServer:
             return
 
         path = request_line.split(" ")[1] if " " in request_line else "/"
-        if path in ("/", "/status", "/health"):
+        if path == "/health":
+            body = json.dumps({"status": "ok"})
+            content_type = "application/json"
+            status_line = "200 OK"
+        elif path in ("/", "/status"):
             body = await self._build_status_json()
             content_type = "application/json"
             status_line = "200 OK"
@@ -481,9 +485,19 @@ async def async_main() -> None:
         with contextlib.suppress(NotImplementedError):
             loop.add_signal_handler(sig, stop_event.set)
 
+    # Arrancar DiagnosticsServer primero para que /health responda
+    # durante la inicializacion pesada (imports, Coinbase auth, etc.)
+    diagnostics_port = int(os.getenv("PORT", "10000"))
+    diagnostics = DiagnosticsServer(redis_client=redis_client_async, port=diagnostics_port)
+    asyncio.create_task(run_service("diagnostics", lambda: diagnostics.start(stop_event), stop_event))
+    await asyncio.sleep(0)  # ceder el loop para que el servidor bind el puerto
+
     coinbase_client = CoinbaseAdvancedTradeClient()
     try:
-        accounts = coinbase_client.validate_credentials()
+        accounts = await asyncio.wait_for(
+            asyncio.to_thread(coinbase_client.validate_credentials),
+            timeout=15.0,
+        )
         logger.info("Coinbase autenticado. accounts_detected={}", len(accounts))
     except Exception as exc:
         logger.warning("No se pudo validar la autenticacion Coinbase: {}", exc)
@@ -510,8 +524,6 @@ async def async_main() -> None:
         order_notional_usd=settings.PILOT_ORDER_NOTIONAL_USD,
     )
     paper_trader = PaperTrader(redis_client=redis_client_async)
-    diagnostics_port = int(os.getenv("PORT", "10000"))
-    diagnostics = DiagnosticsServer(redis_client=redis_client_async, port=diagnostics_port)
 
     service_names = ["collector", "feature_engine", "inference", "trainer", "order_manager", "diagnostics"]
     services = [
@@ -520,7 +532,6 @@ async def async_main() -> None:
         asyncio.create_task(run_service("inference", lambda: inference.start(stop_event), stop_event)),
         asyncio.create_task(run_service("trainer", lambda: trainer.start(stop_event), stop_event)),
         asyncio.create_task(run_service("order_manager", lambda: order_manager.start(stop_event), stop_event)),
-        asyncio.create_task(run_service("diagnostics", lambda: diagnostics.start(stop_event), stop_event)),
     ]
     if settings.PAPER_TRADING_ENABLED:
         services.append(

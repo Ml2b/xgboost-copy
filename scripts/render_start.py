@@ -28,7 +28,7 @@ DEFAULT_HISTORY_CHUNK_LIMIT = 350
 DEFAULT_HISTORY_MAX_REQUESTS_PER_ASSET = 6
 
 
-def _start_bootstrap_health_server() -> None:
+def _start_bootstrap_health_server() -> http.server.HTTPServer:
     """Arranca un servidor HTTP minimo para que Render detecte el puerto durante el bootstrap."""
     port = int(os.getenv("PORT", "10000"))
 
@@ -48,11 +48,12 @@ def _start_bootstrap_health_server() -> None:
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     print(f"[render_start] bootstrap health server listening on port {port}", flush=True)
+    return server
 
 
 def main() -> None:
     """Prepara el entorno persistente y arranca el worker principal."""
-    _start_bootstrap_health_server()
+    bootstrap_server = _start_bootstrap_health_server()
     model_root = Path(
         os.getenv(
             "MODEL_REGISTRY_ROOT",
@@ -72,6 +73,11 @@ def main() -> None:
     print(f"[render_start] history_db_path={history_db_path}", flush=True)
     ensure_seed_models(model_root)
     ensure_history_seed(history_db_path)
+    # Cerrar el socket del bootstrap antes de exec para liberar el puerto 10000
+    try:
+        bootstrap_server.server_close()
+    except Exception:
+        pass
     print("[render_start] launching main.py", flush=True)
     os.execvpe(
         sys.executable,
