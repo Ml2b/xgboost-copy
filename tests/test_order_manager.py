@@ -8,6 +8,7 @@ from decimal import Decimal
 import fakeredis.aioredis
 
 from execution.order_manager import OrderManager
+from execution.position_sizer import KellyFractionalSizer
 
 
 class DummyCoinbaseClient:
@@ -45,6 +46,15 @@ class DummyCoinbaseClient:
         return {"order": {"order_id": order_id, "status": "FILLED"}}
 
 
+def fixed_sizer(base_notional: float = 25.0) -> KellyFractionalSizer:
+    return KellyFractionalSizer(
+        enabled=False,
+        base_notional_usd=base_notional,
+        min_notional_usd=base_notional,
+        max_notional_usd=base_notional,
+    )
+
+
 def test_order_manager_buy_uses_dry_run_fixed_notional() -> None:
     async def run() -> None:
         redis_client = fakeredis.aioredis.FakeRedis(decode_responses=True)
@@ -55,6 +65,7 @@ def test_order_manager_buy_uses_dry_run_fixed_notional() -> None:
             dry_run=True,
             order_notional_usd=25,
             allowed_bases=["BTC"],
+            position_sizer=fixed_sizer(25),
         )
         event = await manager.handle_signal(
             {
@@ -83,6 +94,7 @@ def test_order_manager_blocks_sell_without_inventory() -> None:
             dry_run=True,
             order_notional_usd=25,
             allowed_bases=["BTC"],
+            position_sizer=fixed_sizer(25),
         )
         event = await manager.handle_signal(
             {
@@ -110,6 +122,7 @@ def test_order_manager_accepts_sell_close_when_inventory_exists() -> None:
             dry_run=True,
             order_notional_usd=25,
             allowed_bases=["BTC"],
+            position_sizer=fixed_sizer(25),
         )
         event = await manager.handle_signal(
             {
@@ -139,6 +152,7 @@ def test_order_manager_can_close_dry_run_position_without_real_inventory() -> No
             dry_run=True,
             order_notional_usd=25,
             allowed_bases=["BTC"],
+            position_sizer=fixed_sizer(25),
         )
         await manager.handle_signal(
             {
@@ -177,6 +191,7 @@ def test_order_manager_restores_managed_position_from_redis_state() -> None:
             dry_run=True,
             order_notional_usd=25,
             allowed_bases=["BTC"],
+            position_sizer=fixed_sizer(25),
         )
         await first_manager.handle_signal(
             {
@@ -196,6 +211,7 @@ def test_order_manager_restores_managed_position_from_redis_state() -> None:
             dry_run=True,
             order_notional_usd=25,
             allowed_bases=["BTC"],
+            position_sizer=fixed_sizer(25),
         )
         event = await second_manager.handle_signal(
             {
@@ -224,6 +240,7 @@ def test_order_manager_ignores_non_actionable_assets() -> None:
             dry_run=True,
             order_notional_usd=25,
             allowed_bases=["BTC"],
+            position_sizer=fixed_sizer(25),
         )
         event = await manager.handle_signal(
             {
@@ -281,6 +298,7 @@ def test_order_manager_enforces_cooldown_per_asset() -> None:
             order_notional_usd=25,
             cooldown_seconds=60,
             allowed_bases=["BTC"],
+            position_sizer=fixed_sizer(25),
         )
         first = await manager.handle_signal(
             {
@@ -305,5 +323,36 @@ def test_order_manager_enforces_cooldown_per_asset() -> None:
 
         assert first["decision"] == "accepted_dry_run"
         assert second["decision"] == "cooldown_active"
+
+    asyncio.run(run())
+
+
+def test_order_manager_dynamic_sizer_scales_notional_for_strong_signal() -> None:
+    async def run() -> None:
+        redis_client = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        manager = OrderManager(
+            redis_client=redis_client,
+            coinbase_client=DummyCoinbaseClient(),
+            execution_enabled=True,
+            dry_run=True,
+            order_notional_usd=25,
+            allowed_bases=["BTC"],
+        )
+        event = await manager.handle_signal(
+            {
+                "product_id": "BTC-USD",
+                "signal": "BUY",
+                "prob_buy": 0.67,
+                "buy_threshold": 0.62,
+                "model_id": "m1",
+                "registry_key": "btc_usdt",
+                "actionable": "true",
+            }
+        )
+
+        assert event["decision"] == "accepted_dry_run"
+        assert event["order_payload"]["quote_size"] > 25
+        assert event["sizing_dynamic"] == "true"
+        assert event["sizing_reason"] == "kelly_fractional_dynamic"
 
     asyncio.run(run())

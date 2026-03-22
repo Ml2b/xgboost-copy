@@ -5,7 +5,17 @@ from __future__ import annotations
 import fakeredis.aioredis
 
 from execution.position_exit import PositionExitPolicy
+from execution.position_sizer import KellyFractionalSizer
 from paper.paper_trader import PaperTrader
+
+
+def fixed_sizer(base_notional: float) -> KellyFractionalSizer:
+    return KellyFractionalSizer(
+        enabled=False,
+        base_notional_usd=base_notional,
+        min_notional_usd=base_notional,
+        max_notional_usd=base_notional,
+    )
 
 
 def test_paper_trader_buys_and_opens_position() -> None:
@@ -15,6 +25,7 @@ def test_paper_trader_buys_and_opens_position() -> None:
         order_notional_usd=100,
         fee_pct=0.0,
         slippage_pct=0.0,
+        position_sizer=fixed_sizer(100),
     )
     trader.handle_candle({"product_id": "BTC-USD", "close": "100"})
     event = trader.handle_signal(
@@ -43,6 +54,7 @@ def test_paper_trader_sells_and_realizes_pnl() -> None:
         fee_pct=0.0,
         slippage_pct=0.0,
         exit_policy=PositionExitPolicy(stop_loss_pct=50.0, take_profit_pct=50.0, max_hold_minutes=10_000),
+        position_sizer=fixed_sizer(100),
     )
     trader.handle_candle({"product_id": "BTC-USD", "close": "100"})
     trader.handle_signal(
@@ -117,6 +129,7 @@ def test_paper_trader_applies_per_asset_slippage_override() -> None:
         fee_pct=0.0,
         slippage_pct=0.1,
         slippage_pct_by_base={"PENGU": 2.0},
+        position_sizer=fixed_sizer(100),
     )
     trader.handle_candle({"product_id": "PENGU-USD", "close": "10"})
     event = trader.handle_signal(
@@ -143,6 +156,7 @@ def test_paper_trader_forces_exit_on_take_profit_rule() -> None:
         fee_pct=0.0,
         slippage_pct=0.0,
         exit_policy=PositionExitPolicy(stop_loss_pct=1.0, take_profit_pct=5.0, max_hold_minutes=120),
+        position_sizer=fixed_sizer(100),
     )
     trader.handle_candle({"product_id": "BTC-USD", "close": "100", "close_time": "1000"})
     trader.handle_signal(
@@ -160,3 +174,29 @@ def test_paper_trader_forces_exit_on_take_profit_rule() -> None:
     assert event is not None
     assert event["decision"] == "paper_exit_rule_filled"
     assert event["reason"] == "take_profit_hit"
+
+
+def test_paper_trader_dynamic_sizer_increases_notional_on_strong_signal() -> None:
+    trader = PaperTrader(
+        redis_client=fakeredis.aioredis.FakeRedis(decode_responses=True),
+        initial_cash=20000,
+        order_notional_usd=25,
+        fee_pct=0.0,
+        slippage_pct=0.0,
+    )
+    trader.handle_candle({"product_id": "TAO-USD", "close": "100"})
+    event = trader.handle_signal(
+        {
+            "product_id": "TAO-USD",
+            "signal": "BUY",
+            "prob_buy": 0.67,
+            "buy_threshold": 0.62,
+            "model_id": "m5",
+            "registry_key": "tao_usd",
+            "actionable": "true",
+        }
+    )
+
+    assert event["decision"] == "paper_buy_filled"
+    assert event["sizing_notional_usd"] > 25
+    assert event["sizing_dynamic"] == "true"

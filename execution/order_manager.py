@@ -14,6 +14,7 @@ from loguru import logger
 from config import settings
 from exchange.coinbase_client import CoinbaseAdvancedTradeClient
 from execution.position_exit import PositionExitPolicy
+from execution.position_sizer import KellyFractionalSizer, PositionSizingDecision
 from risk.guardian import Portfolio, RiskGuardian
 
 
@@ -53,6 +54,7 @@ class OrderManager:
         allowed_bases: list[str] | None = None,
         drawdown_today: float = 0.0,
         exit_policy: PositionExitPolicy | None = None,
+        position_sizer: KellyFractionalSizer | None = None,
     ) -> None:
         self.redis_client = redis_client
         self.coinbase_client = coinbase_client
@@ -68,6 +70,7 @@ class OrderManager:
         }
         self.drawdown_today = drawdown_today
         self.exit_policy = exit_policy or PositionExitPolicy()
+        self.position_sizer = position_sizer or KellyFractionalSizer(base_notional_usd=self.order_notional_usd)
         self.stats = ExecutionStats()
         self._cooldown_until_by_asset: dict[str, float] = {}
         self._asset_locks: dict[str, asyncio.Lock] = {}
@@ -206,12 +209,11 @@ class OrderManager:
                 except Exception:
                     balances = {}
                 try:
-                    best_bid_ask = self.coinbase_client.get_best_bid_ask(
-                        product_id,
-                        prefer_private=False,
+                    best_bid_ask = self.coinbase_client.get_best_bid_ask_public(
+                        product_id
                     )
-                except TypeError:
-                    best_bid_ask = self.coinbase_client.get_best_bid_ask(product_id)
+                except Exception:
+                    best_bid_ask = {}
             else:
                 balances = self.coinbase_client.get_account_balances()
                 best_bid_ask = self.coinbase_client.get_best_bid_ask(product_id)
@@ -273,9 +275,15 @@ class OrderManager:
             )
 
         if signal == "BUY":
+            sizing_decision = self.position_sizer.size(
+                prob_buy=prob_buy,
+                buy_threshold=float(payload.get("buy_threshold", settings.MIN_SIGNAL_PROB)),
+                capital_total=portfolio.capital_total,
+                capital_available=portfolio.capital_disponible,
+            )
             risk_payload = {
                 "signal": signal,
-                "risk_pct": self._risk_pct(portfolio.capital_total),
+                "risk_pct": sizing_decision.risk_pct,
                 "prob_buy": prob_buy,
                 "spread_pct": best_bid_ask["spread_pct"],
                 "timestamp_ms": current_timestamp_ms,
@@ -295,6 +303,10 @@ class OrderManager:
                     spread_pct=best_bid_ask["spread_pct"],
                     dry_run=self.dry_run,
                     latency_ms=self._elapsed_ms(started),
+                    sizing_notional_usd=round(sizing_decision.notional_usd, 6),
+                    sizing_reason=sizing_decision.reason,
+                    sizing_dynamic=str(sizing_decision.used_dynamic).lower(),
+                    risk_pct=round(sizing_decision.risk_pct, 8),
                 )
             return await self._handle_buy(
                 product_id=product_id,
@@ -308,6 +320,7 @@ class OrderManager:
                 balances=balances,
                 latency_started=started,
                 reference_price=float(best_bid_ask.get("ask") or best_bid_ask.get("mid") or 0.0),
+                sizing_decision=sizing_decision,
             )
 
         return await self._handle_sell(
@@ -338,7 +351,9 @@ class OrderManager:
         balances: dict[str, Decimal],
         latency_started: float,
         reference_price: float,
+        sizing_decision: PositionSizingDecision,
     ) -> dict[str, Any]:
+        target_notional_usd = float(sizing_decision.notional_usd)
         quote_balance = balances.get(quote_asset.upper(), Decimal("0"))
         base_balance = balances.get(base_asset.upper(), Decimal("0"))
         if product_id in self._managed_positions or base_balance >= base_min_size:
@@ -356,7 +371,26 @@ class OrderManager:
                 latency_ms=self._elapsed_ms(latency_started),
             )
 
-        if not self.dry_run and quote_balance < Decimal(str(self.order_notional_usd)):
+        if target_notional_usd <= 0:
+            self.stats.rejected += 1
+            return self._base_event(
+                product_id=product_id,
+                signal="BUY",
+                decision="blocked_sizing_zero",
+                prob_buy=prob_buy,
+                model_id=model_id,
+                registry_key=registry_key,
+                actionable=False,
+                reason="Sizer devolvio notional cero",
+                dry_run=self.dry_run,
+                latency_ms=self._elapsed_ms(latency_started),
+                sizing_notional_usd=round(target_notional_usd, 6),
+                sizing_reason=sizing_decision.reason,
+                sizing_dynamic=str(sizing_decision.used_dynamic).lower(),
+                risk_pct=round(sizing_decision.risk_pct, 8),
+            )
+
+        if not self.dry_run and quote_balance < Decimal(str(target_notional_usd)):
             self.stats.rejected += 1
             return self._base_event(
                 product_id=product_id,
@@ -369,12 +403,16 @@ class OrderManager:
                 reason=f"Saldo insuficiente en {quote_asset}",
                 dry_run=self.dry_run,
                 latency_ms=self._elapsed_ms(latency_started),
+                sizing_notional_usd=round(target_notional_usd, 6),
+                sizing_reason=sizing_decision.reason,
+                sizing_dynamic=str(sizing_decision.used_dynamic).lower(),
+                risk_pct=round(sizing_decision.risk_pct, 8),
             )
 
         if self.dry_run or not self.execution_enabled:
             self.stats.dry_runs += 1
             self._mark_cooldown(product_id)
-            synthetic_quantity = 0.0 if reference_price <= 0 else self.order_notional_usd / reference_price
+            synthetic_quantity = 0.0 if reference_price <= 0 else target_notional_usd / reference_price
             self._managed_positions[product_id] = ManagedPosition(
                 product_id=product_id,
                 entry_price=reference_price,
@@ -384,10 +422,11 @@ class OrderManager:
             )
             await self._persist_managed_positions()
             logger.info(
-                "OrderManager dry-run BUY aceptado. product_id={} notional_usd={} model_id={}",
+                "OrderManager dry-run BUY aceptado. product_id={} notional_usd={} model_id={} sizing_reason={}",
                 product_id,
-                self.order_notional_usd,
+                target_notional_usd,
                 model_id,
+                sizing_decision.reason,
             )
             return self._base_event(
                 product_id=product_id,
@@ -397,15 +436,22 @@ class OrderManager:
                 model_id=model_id,
                 registry_key=registry_key,
                 actionable=actionable,
-                order_payload={"side": "BUY", "quote_size": self.order_notional_usd},
+                order_payload={"side": "BUY", "quote_size": round(target_notional_usd, 6)},
                 dry_run=self.dry_run,
                 latency_ms=self._elapsed_ms(latency_started),
+                sizing_notional_usd=round(target_notional_usd, 6),
+                sizing_reason=sizing_decision.reason,
+                sizing_dynamic=str(sizing_decision.used_dynamic).lower(),
+                sizing_kelly_raw=round(sizing_decision.raw_kelly_fraction, 8),
+                sizing_kelly_applied=round(sizing_decision.applied_kelly_fraction, 8),
+                sizing_confidence_scale=round(sizing_decision.confidence_scale, 8),
+                risk_pct=round(sizing_decision.risk_pct, 8),
             )
 
         try:
-            response = self.coinbase_client.place_market_buy_quote(product_id, self.order_notional_usd)
+            response = self.coinbase_client.place_market_buy_quote(product_id, target_notional_usd)
             self.stats.live_orders += 1
-            synthetic_quantity = 0.0 if reference_price <= 0 else self.order_notional_usd / reference_price
+            synthetic_quantity = 0.0 if reference_price <= 0 else target_notional_usd / reference_price
             self._managed_positions[product_id] = ManagedPosition(
                 product_id=product_id,
                 entry_price=reference_price,
@@ -415,10 +461,11 @@ class OrderManager:
             )
             await self._persist_managed_positions()
             logger.info(
-                "OrderManager envio BUY live. product_id={} notional_usd={} model_id={}",
+                "OrderManager envio BUY live. product_id={} notional_usd={} model_id={} sizing_reason={}",
                 product_id,
-                self.order_notional_usd,
+                target_notional_usd,
                 model_id,
+                sizing_decision.reason,
             )
             event = await self._live_order_event(
                 product_id=product_id,
@@ -430,6 +477,13 @@ class OrderManager:
                 response=response,
                 latency_started=latency_started,
             )
+            event["sizing_notional_usd"] = round(target_notional_usd, 6)
+            event["sizing_reason"] = sizing_decision.reason
+            event["sizing_dynamic"] = str(sizing_decision.used_dynamic).lower()
+            event["sizing_kelly_raw"] = round(sizing_decision.raw_kelly_fraction, 8)
+            event["sizing_kelly_applied"] = round(sizing_decision.applied_kelly_fraction, 8)
+            event["sizing_confidence_scale"] = round(sizing_decision.confidence_scale, 8)
+            event["risk_pct"] = round(sizing_decision.risk_pct, 8)
             self._mark_cooldown(product_id)
             return event
         except Exception as exc:
@@ -445,6 +499,10 @@ class OrderManager:
                 reason=str(exc),
                 dry_run=self.dry_run,
                 latency_ms=self._elapsed_ms(latency_started),
+                sizing_notional_usd=round(target_notional_usd, 6),
+                sizing_reason=sizing_decision.reason,
+                sizing_dynamic=str(sizing_decision.used_dynamic).lower(),
+                risk_pct=round(sizing_decision.risk_pct, 8),
             )
 
     async def _handle_sell(
@@ -617,13 +675,13 @@ class OrderManager:
             posiciones_abiertas=posiciones_abiertas,
         )
 
-    def _risk_pct(self, capital_total: float) -> float:
+    def _risk_pct(self, capital_total: float, notional_usd: float) -> float:
         if self.dry_run:
             return 0.0
         if capital_total <= 0:
             return 1.0
         stop_distance = settings.POSITION_STOP_LOSS_PCT / 100.0
-        return float((self.order_notional_usd * stop_distance) / capital_total)
+        return float((notional_usd * stop_distance) / capital_total)
 
     def _is_in_cooldown(self, product_id: str) -> bool:
         return self._cooldown_until_by_asset.get(product_id, 0.0) > time.time()
@@ -747,6 +805,7 @@ class OrderManager:
         order_id: str = "",
         order_payload: dict[str, Any] | None = None,
         exchange_response: dict[str, Any] | None = None,
+        **extra: Any,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "product_id": product_id,
@@ -768,4 +827,5 @@ class OrderManager:
             payload["order_payload"] = order_payload
         if exchange_response is not None:
             payload["exchange_response"] = exchange_response
+        payload.update(extra)
         return payload

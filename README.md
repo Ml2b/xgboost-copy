@@ -278,6 +278,14 @@ Codex Cloud:
 powershell -ExecutionPolicy Bypass -File .\scripts\codex-collab.ps1 submit -Mode build -Prompt "Implementa la tarea"
 ```
 
+Primer uso en una copia nueva del workspace:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\codex-collab.ps1 submit -Mode build -EnvironmentId "<tu_environment_id>" -Prompt "Implementa la tarea"
+```
+
+Ese primer `-EnvironmentId` queda guardado automaticamente en `.workspace_agents/codex_cloud_bridge.json` para las siguientes corridas.
+
 Claude Code en VS Code:
 
 ```powershell

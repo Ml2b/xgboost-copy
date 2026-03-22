@@ -22,7 +22,15 @@ def test_first_model_is_promoted_if_it_passes_minimum(tmp_path) -> None:
     registry = ModelRegistry(base_dir=tmp_path)
     record = registry.register(
         model=DummyModel("first"),
-        metrics=ModelMetrics(auc_val=0.60, sharpe=0.3, precision_buy=0.6, win_rate=0.55, max_drawdown=0.1),
+        metrics=ModelMetrics(
+            auc_val=0.60,
+            sharpe=0.3,
+            precision_buy=0.6,
+            win_rate=0.55,
+            max_drawdown=0.1,
+            buy_support=60,
+            entry_ready=True,
+        ),
         fechas={"train_start": "a", "train_end": "b", "val_start": "c", "val_end": "d"},
         feature_names=["f1", "f2"],
     )
@@ -34,7 +42,15 @@ def test_first_model_is_not_promoted_with_negative_sharpe(tmp_path) -> None:
     registry = ModelRegistry(base_dir=tmp_path)
     record = registry.register(
         model=DummyModel("first"),
-        metrics=ModelMetrics(auc_val=0.60, sharpe=-0.1, precision_buy=0.6, win_rate=0.55, max_drawdown=0.1),
+        metrics=ModelMetrics(
+            auc_val=0.60,
+            sharpe=-0.1,
+            precision_buy=0.6,
+            win_rate=0.55,
+            max_drawdown=0.1,
+            buy_support=60,
+            entry_ready=True,
+        ),
         fechas={"train_start": "a", "train_end": "b", "val_start": "c", "val_end": "d"},
         feature_names=["f1", "f2"],
     )
@@ -46,7 +62,15 @@ def test_worse_model_does_not_replace_active_one(tmp_path) -> None:
     registry = ModelRegistry(base_dir=tmp_path)
     first = registry.register(
         model=DummyModel("first"),
-        metrics=ModelMetrics(auc_val=0.60, sharpe=0.3, precision_buy=0.6, win_rate=0.55, max_drawdown=0.1),
+        metrics=ModelMetrics(
+            auc_val=0.60,
+            sharpe=0.3,
+            precision_buy=0.6,
+            win_rate=0.55,
+            max_drawdown=0.1,
+            buy_support=60,
+            entry_ready=True,
+        ),
         fechas={"train_start": "a", "train_end": "b", "val_start": "c", "val_end": "d"},
         feature_names=["f1", "f2"],
     )
@@ -54,7 +78,15 @@ def test_worse_model_does_not_replace_active_one(tmp_path) -> None:
 
     second = registry.register(
         model=DummyModel("second"),
-        metrics=ModelMetrics(auc_val=0.58, sharpe=0.35, precision_buy=0.61, win_rate=0.56, max_drawdown=0.1),
+        metrics=ModelMetrics(
+            auc_val=0.58,
+            sharpe=0.35,
+            precision_buy=0.61,
+            win_rate=0.56,
+            max_drawdown=0.1,
+            buy_support=60,
+            entry_ready=True,
+        ),
         fechas={"train_start": "a", "train_end": "b", "val_start": "c", "val_end": "d"},
         feature_names=["f3"],
     )
@@ -62,6 +94,68 @@ def test_worse_model_does_not_replace_active_one(tmp_path) -> None:
 
     meta = json.loads((tmp_path / "active_model_meta.json").read_text(encoding="utf-8"))
     assert meta["feature_names"] == ["f1", "f2"]
+
+
+def test_first_model_is_not_promoted_without_buy_support(tmp_path) -> None:
+    registry = ModelRegistry(base_dir=tmp_path)
+    record = registry.register(
+        model=DummyModel("first"),
+        metrics=ModelMetrics(
+            auc_val=0.64,
+            sharpe=0.5,
+            precision_buy=0.7,
+            win_rate=0.6,
+            max_drawdown=0.08,
+            buy_support=0,
+            entry_ready=False,
+        ),
+        fechas={"train_start": "a", "train_end": "b", "val_start": "c", "val_end": "d"},
+        feature_names=["f1", "f2"],
+    )
+    assert registry.try_promote(record) is False
+    assert registry.has_active_model() is False
+
+
+def test_selective_high_threshold_model_can_promote_without_entry_ready(tmp_path) -> None:
+    registry = ModelRegistry(base_dir=tmp_path)
+    record = registry.register(
+        model=DummyModel("selective"),
+        metrics=ModelMetrics(
+            auc_val=0.57,
+            sharpe=2.2,
+            precision_buy=0.67,
+            win_rate=0.66,
+            max_drawdown=0.02,
+            buy_support=36,
+            buy_threshold=0.62,
+            entry_ready=False,
+        ),
+        fechas={"train_start": "a", "train_end": "b", "val_start": "c", "val_end": "d"},
+        feature_names=["f1", "f2"],
+    )
+    assert registry.try_promote(record) is True
+    assert registry.has_active_model() is True
+
+
+def test_selective_high_threshold_model_is_blocked_by_drawdown(tmp_path) -> None:
+    registry = ModelRegistry(base_dir=tmp_path)
+    record = registry.register(
+        model=DummyModel("selective"),
+        metrics=ModelMetrics(
+            auc_val=0.57,
+            sharpe=2.2,
+            precision_buy=0.67,
+            win_rate=0.66,
+            max_drawdown=0.23,
+            buy_support=36,
+            buy_threshold=0.62,
+            entry_ready=False,
+        ),
+        fechas={"train_start": "a", "train_end": "b", "val_start": "c", "val_end": "d"},
+        feature_names=["f1", "f2"],
+    )
+    assert registry.try_promote(record) is False
+    assert registry.has_active_model() is False
 
 
 def test_multi_asset_registry_resolves_by_base_and_observation_state(tmp_path) -> None:

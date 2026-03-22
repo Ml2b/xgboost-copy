@@ -202,10 +202,14 @@ class FeatureCalculator:
         open_: np.ndarray,
     ) -> np.ndarray:
         """Usa trade_count real si existe; si no, genera un proxy estable."""
+        proxy = np.where(close > 0, (np.abs(close - open_) / close) * 10_000.0, 1.0)
         if "trade_count" in frame.columns:
             trade_count = frame["trade_count"].astype(float).to_numpy()
+            invalid_mask = ~np.isfinite(trade_count) | (trade_count <= 0)
+            if np.any(invalid_mask):
+                trade_count = trade_count.copy()
+                trade_count[invalid_mask] = proxy[invalid_mask]
             return np.maximum(trade_count, 1.0)
-        proxy = np.where(close > 0, (np.abs(close - open_) / close) * 10_000.0, 1.0)
         return np.maximum(proxy, 1.0)
 
     @staticmethod

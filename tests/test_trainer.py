@@ -10,6 +10,7 @@ import pandas as pd
 from features.selector import SelectorConfig
 from model.registry import ModelMetrics
 from model.registry import ModelRegistry
+from model.signal_bundle import SignalModelBundle
 import model.trainer as trainer_module
 from model.trainer import Trainer
 from tests.helpers import make_synthetic_candles
@@ -141,7 +142,15 @@ def test_trainer_falls_back_to_cold_start_when_continuation_fails(tmp_path, monk
     registry = ModelRegistry(base_dir=tmp_path / "models")
     record = registry.register(
         model=_PersistedDummyModel("old"),
-        metrics=ModelMetrics(auc_val=0.60, sharpe=0.3, precision_buy=0.6, win_rate=0.55, max_drawdown=0.1),
+        metrics=ModelMetrics(
+            auc_val=0.60,
+            sharpe=0.3,
+            precision_buy=0.6,
+            win_rate=0.55,
+            max_drawdown=0.1,
+            buy_support=60,
+            entry_ready=True,
+        ),
         fechas={"train_start": "a", "train_end": "b", "val_start": "c", "val_end": "d"},
         feature_names=["f1", "f2"],
     )
@@ -163,4 +172,5 @@ def test_trainer_falls_back_to_cold_start_when_continuation_fails(tmp_path, monk
     model, used_continuation = trainer._fit_final_model(df, ["f1", "f2"], sample_weight=weights)
 
     assert used_continuation is False
-    assert isinstance(model, _ContinuationSensitiveModel)
+    assert isinstance(model, SignalModelBundle)
+    assert isinstance(model.primary_model, _ContinuationSensitiveModel)

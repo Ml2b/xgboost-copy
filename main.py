@@ -84,6 +84,8 @@ class FeatureEngine:
 
         frame = pd.DataFrame(buffer)
         features_frame = self.calculator.compute(frame)
+        if features_frame.empty:
+            return
         latest = features_frame.iloc[-1].to_dict()
         latest["product_id"] = product_id
         await self.redis_client.xadd(

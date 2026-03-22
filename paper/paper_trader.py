@@ -11,6 +11,7 @@ from loguru import logger
 
 from config import settings
 from execution.position_exit import PositionExitPolicy
+from execution.position_sizer import KellyFractionalSizer, PositionSizingDecision
 from risk.guardian import Portfolio, RiskGuardian
 
 
@@ -52,6 +53,7 @@ class PaperTrader:
         slippage_pct: float = settings.PAPER_SLIPPAGE_PCT,
         slippage_pct_by_base: dict[str, float] | None = None,
         exit_policy: PositionExitPolicy | None = None,
+        position_sizer: KellyFractionalSizer | None = None,
     ) -> None:
         self.redis_client = redis_client
         self.guardian = guardian or RiskGuardian()
@@ -65,6 +67,7 @@ class PaperTrader:
             if base.strip()
         }
         self.exit_policy = exit_policy or PositionExitPolicy()
+        self.position_sizer = position_sizer or KellyFractionalSizer(base_notional_usd=self.order_notional_usd)
         self.cash = float(initial_cash)
         self.realized_pnl = 0.0
         self.peak_equity = float(initial_cash)
@@ -79,11 +82,12 @@ class PaperTrader:
         """Arranca consumidores de velas y señales en paralelo."""
         stop_event = stop_event or asyncio.Event()
         logger.info(
-            "PaperTrader iniciado. initial_cash={} order_notional_usd={} fee_pct={} slippage_pct={}",
+            "PaperTrader iniciado. initial_cash={} order_notional_usd={} fee_pct={} slippage_pct={} sizing_enabled={}",
             self.initial_cash,
             self.order_notional_usd,
             self.fee_pct,
             self.slippage_pct,
+            self.position_sizer.enabled,
         )
         candle_task = asyncio.create_task(self._consume_candles(stop_event))
         signal_task = asyncio.create_task(self._consume_signals(stop_event))
@@ -237,6 +241,7 @@ class PaperTrader:
                 registry_key=registry_key,
                 timestamp_ms=timestamp_ms,
                 started=started,
+                buy_threshold=float(payload.get("buy_threshold", settings.MIN_SIGNAL_PROB)),
             )
         if signal in {"SELL", "EXIT_LONG"}:
             return self._close_position(
@@ -272,6 +277,7 @@ class PaperTrader:
         registry_key: str,
         timestamp_ms: int,
         started: float,
+        buy_threshold: float,
     ) -> dict[str, Any]:
         if product_id in self.positions:
             return self._base_event(
@@ -292,11 +298,17 @@ class PaperTrader:
             drawdown_hoy=self.current_state().drawdown_pct,
             posiciones_abiertas=len(self.positions),
         )
-        risk_pct = (self.order_notional_usd * (settings.POSITION_STOP_LOSS_PCT / 100.0)) / max(equity, 1e-9)
+        sizing_decision = self.position_sizer.size(
+            prob_buy=prob_buy,
+            buy_threshold=buy_threshold,
+            capital_total=equity,
+            capital_available=self.cash,
+        )
+        target_notional = float(sizing_decision.notional_usd)
         allowed, reason = self.guardian.check(
             {
                 "signal": "BUY",
-                "risk_pct": risk_pct,
+                "risk_pct": sizing_decision.risk_pct,
                 "prob_buy": prob_buy,
                 "spread_pct": 0.0,
                 "timestamp_ms": timestamp_ms,
@@ -315,13 +327,37 @@ class PaperTrader:
                 actionable=False,
                 reason=reason,
                 latency_ms=self._elapsed_ms(started),
+                sizing_notional_usd=round(target_notional, 6),
+                sizing_reason=sizing_decision.reason,
+                sizing_dynamic=str(sizing_decision.used_dynamic).lower(),
+                sizing_kelly_raw=round(sizing_decision.raw_kelly_fraction, 8),
+                sizing_kelly_applied=round(sizing_decision.applied_kelly_fraction, 8),
+                sizing_confidence_scale=round(sizing_decision.confidence_scale, 8),
+                risk_pct=round(sizing_decision.risk_pct, 8),
+            )
+
+        if target_notional <= 0:
+            return self._base_event(
+                product_id=product_id,
+                signal="BUY",
+                decision="blocked_sizing_zero",
+                prob_buy=prob_buy,
+                model_id=model_id,
+                registry_key=registry_key,
+                actionable=False,
+                reason="Sizer devolvio notional cero",
+                latency_ms=self._elapsed_ms(started),
+                sizing_notional_usd=round(target_notional, 6),
+                sizing_reason=sizing_decision.reason,
+                sizing_dynamic=str(sizing_decision.used_dynamic).lower(),
+                risk_pct=round(sizing_decision.risk_pct, 8),
             )
 
         fee_rate = self.fee_pct / 100.0
         applied_slippage_pct = self._slippage_for_product(product_id)
         execution_price = price * (1.0 + applied_slippage_pct / 100.0)
-        fee = self.order_notional_usd * fee_rate
-        total_cost = self.order_notional_usd + fee
+        fee = target_notional * fee_rate
+        total_cost = target_notional + fee
         if total_cost > self.cash:
             return self._base_event(
                 product_id=product_id,
@@ -333,15 +369,19 @@ class PaperTrader:
                 actionable=False,
                 reason="Cash insuficiente para abrir posicion paper",
                 latency_ms=self._elapsed_ms(started),
+                sizing_notional_usd=round(target_notional, 6),
+                sizing_reason=sizing_decision.reason,
+                sizing_dynamic=str(sizing_decision.used_dynamic).lower(),
+                risk_pct=round(sizing_decision.risk_pct, 8),
             )
 
-        quantity = self.order_notional_usd / execution_price
+        quantity = target_notional / execution_price
         self.cash -= total_cost
         self.positions[product_id] = PaperPosition(
             product_id=product_id,
             quantity=quantity,
             entry_price=execution_price,
-            entry_notional=self.order_notional_usd,
+            entry_notional=target_notional,
             entry_fee=fee,
             opened_at_ms=timestamp_ms,
             model_id=model_id,
@@ -368,6 +408,13 @@ class PaperTrader:
             quantity=round(quantity, 12),
             fee=round(fee, 8),
             applied_slippage_pct=round(applied_slippage_pct, 6),
+            sizing_notional_usd=round(target_notional, 6),
+            sizing_reason=sizing_decision.reason,
+            sizing_dynamic=str(sizing_decision.used_dynamic).lower(),
+            sizing_kelly_raw=round(sizing_decision.raw_kelly_fraction, 8),
+            sizing_kelly_applied=round(sizing_decision.applied_kelly_fraction, 8),
+            sizing_confidence_scale=round(sizing_decision.confidence_scale, 8),
+            risk_pct=round(sizing_decision.risk_pct, 8),
             cash=round(state.cash, 8),
             equity=round(state.equity, 8),
             drawdown_pct=round(state.drawdown_pct, 8),

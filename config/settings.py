@@ -6,6 +6,9 @@ import os
 from urllib.parse import unquote, urlparse
 from typing import Final
 
+# Evita warnings de joblib/loky en entornos donde no se detectan cores fisicos.
+os.environ.setdefault("LOKY_MAX_CPU_COUNT", str(max(1, os.cpu_count() or 1)))
+
 
 def _merge_unique_bases(*groups: list[str]) -> list[str]:
     """Une listas de activos preservando orden y evitando duplicados."""
@@ -185,6 +188,21 @@ XGB_PARAMS: Final[dict[str, object]] = {
     "random_state": 42,
     "verbosity": 0,
 }
+LIGHTGBM_ENABLED: Final[bool] = os.getenv("LIGHTGBM_ENABLED", "true").lower() == "true"
+LGBM_PARAMS: Final[dict[str, object]] = {
+    "objective": "binary",
+    "metric": "auc",
+    "max_depth": 4,
+    "learning_rate": 0.05,
+    "n_estimators": 300,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "min_child_samples": 20,
+    "reg_alpha": 0.05,
+    "reg_lambda": 1.5,
+    "random_state": 42,
+    "verbosity": -1,
+}
 
 # Target
 TARGET_HORIZON: Final[int] = 15
@@ -212,6 +230,38 @@ REGIME_RANGE_COMPRESSION_MIN: Final[float] = float(
     os.getenv("REGIME_RANGE_COMPRESSION_MIN", "0.25")
 )
 REGIME_BB_WIDTH_MIN: Final[float] = float(os.getenv("REGIME_BB_WIDTH_MIN", "0.004"))
+REGIME_HMM_ENABLED: Final[bool] = os.getenv("REGIME_HMM_ENABLED", "true").lower() == "true"
+REGIME_HMM_STATES: Final[int] = int(os.getenv("REGIME_HMM_STATES", "3"))
+REGIME_MODEL_MIN_ROWS: Final[int] = int(os.getenv("REGIME_MODEL_MIN_ROWS", "300"))
+DRIFT_MONITOR_ENABLED: Final[bool] = os.getenv("DRIFT_MONITOR_ENABLED", "true").lower() == "true"
+DRIFT_BLOCK_THRESHOLD_RATIO: Final[float] = float(
+    os.getenv("DRIFT_BLOCK_THRESHOLD_RATIO", "0.30")
+)
+DRIFT_BOUND_MARGIN_PCT: Final[float] = float(
+    os.getenv("DRIFT_BOUND_MARGIN_PCT", "0.10")
+)
+DRIFT_MIN_FEATURE_CHECKS: Final[int] = int(os.getenv("DRIFT_MIN_FEATURE_CHECKS", "8"))
+THRESHOLD_GRID_SIZE: Final[int] = int(os.getenv("THRESHOLD_GRID_SIZE", "7"))
+THRESHOLD_MIN_SUPPORT_PCT: Final[float] = float(
+    os.getenv("THRESHOLD_MIN_SUPPORT_PCT", "0.03")
+)
+THRESHOLD_MIN_SUPPORT_ABS: Final[int] = int(os.getenv("THRESHOLD_MIN_SUPPORT_ABS", "30"))
+THRESHOLD_MIN_BUY_PRECISION: Final[float] = float(
+    os.getenv("THRESHOLD_MIN_BUY_PRECISION", "0.55")
+)
+PROMOTION_MIN_BUY_SUPPORT: Final[int] = int(os.getenv("PROMOTION_MIN_BUY_SUPPORT", "30"))
+SELECTIVE_PROMOTION_MIN_AUC: Final[float] = float(os.getenv("SELECTIVE_PROMOTION_MIN_AUC", "0.55"))
+SELECTIVE_PROMOTION_MIN_SHARPE: Final[float] = float(os.getenv("SELECTIVE_PROMOTION_MIN_SHARPE", "2.0"))
+SELECTIVE_PROMOTION_MIN_PRECISION: Final[float] = float(
+    os.getenv("SELECTIVE_PROMOTION_MIN_PRECISION", "0.65")
+)
+SELECTIVE_PROMOTION_MIN_SUPPORT: Final[int] = int(os.getenv("SELECTIVE_PROMOTION_MIN_SUPPORT", "20"))
+SELECTIVE_PROMOTION_MIN_THRESHOLD: Final[float] = float(
+    os.getenv("SELECTIVE_PROMOTION_MIN_THRESHOLD", "0.62")
+)
+SELECTIVE_PROMOTION_MAX_DRAWDOWN: Final[float] = float(
+    os.getenv("SELECTIVE_PROMOTION_MAX_DRAWDOWN", "0.10")
+)
 MODEL_REGISTRY_ROOT: Final[str] = os.getenv("MODEL_REGISTRY_ROOT", "models/multi_asset_live_v2")
 STUDIED_UNIVERSE_PAPER_ROOT: Final[str] = os.getenv(
     "STUDIED_UNIVERSE_PAPER_ROOT",
@@ -259,6 +309,19 @@ COINBASE_CREDENTIALS_PATH: Final[str] = os.getenv(
 EXECUTION_ENABLED: Final[bool] = os.getenv("EXECUTION_ENABLED", "true").lower() == "true"
 EXECUTION_DRY_RUN: Final[bool] = os.getenv("EXECUTION_DRY_RUN", "true").lower() == "true"
 PILOT_ORDER_NOTIONAL_USD: Final[float] = float(os.getenv("PILOT_ORDER_NOTIONAL_USD", "25"))
+POSITION_SIZER_ENABLED: Final[bool] = os.getenv("POSITION_SIZER_ENABLED", "true").lower() == "true"
+POSITION_SIZER_KELLY_FRACTION: Final[float] = float(
+    os.getenv("POSITION_SIZER_KELLY_FRACTION", "0.10")
+)
+POSITION_SIZER_MAX_CAPITAL_FRACTION: Final[float] = float(
+    os.getenv("POSITION_SIZER_MAX_CAPITAL_FRACTION", "0.005")
+)
+POSITION_SIZER_MIN_NOTIONAL_USD: Final[float] = float(
+    os.getenv("POSITION_SIZER_MIN_NOTIONAL_USD", str(PILOT_ORDER_NOTIONAL_USD))
+)
+POSITION_SIZER_MAX_NOTIONAL_USD: Final[float] = float(
+    os.getenv("POSITION_SIZER_MAX_NOTIONAL_USD", str(PILOT_ORDER_NOTIONAL_USD * 2))
+)
 EXECUTION_COOLDOWN_SECONDS: Final[int] = int(os.getenv("EXECUTION_COOLDOWN_SECONDS", "60"))
 EXECUTION_ALLOWED_BASES: Final[list[str]] = [
     base.strip()

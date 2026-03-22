@@ -43,6 +43,15 @@ STREAM_EXPORTS: list[tuple[str, str]] = [
 ]
 
 
+async def _ensure_group(redis_client: fakeredis.aioredis.FakeRedis, stream: str, group: str) -> None:
+    """Crea consumer groups desde el inicio del stream para no perder mensajes de arranque."""
+    try:
+        await redis_client.xgroup_create(stream, group, id="0", mkstream=True)
+    except Exception as exc:
+        if "BUSYGROUP" not in str(exc):
+            raise
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Construye el parser CLI."""
     parser = argparse.ArgumentParser(description="Corre una sesion larga de paper trading multi-activo.")
@@ -156,15 +165,21 @@ async def main() -> None:
         slippage_pct_by_base=slippage_overrides,
     )
     _prime_feature_buffers(feature_engine, products)
+    await _ensure_group(redis_async, settings.STREAM_MARKET_CANDLES_1M, "feature-engine")
+    await _ensure_group(redis_async, settings.STREAM_MARKET_FEATURES, "inference-engine")
+    await _ensure_group(redis_async, settings.STREAM_INFERENCE_SIGNALS, "order-manager")
+    await _ensure_group(redis_async, settings.STREAM_MARKET_CANDLES_1M, "paper-trader-candles")
+    await _ensure_group(redis_async, settings.STREAM_INFERENCE_SIGNALS, "paper-trader-signals")
 
     stop_event = asyncio.Event()
     tasks = [
-        asyncio.create_task(collector.start(stop_event)),
         asyncio.create_task(feature_engine.start(stop_event)),
         asyncio.create_task(inference.start(stop_event)),
         asyncio.create_task(order_manager.start(stop_event)),
         asyncio.create_task(paper_trader.start(stop_event)),
     ]
+    await asyncio.sleep(0.25)
+    tasks.append(asyncio.create_task(collector.start(stop_event)))
 
     try:
         await asyncio.sleep(args.seconds)

@@ -77,6 +77,11 @@ class ModelMetrics:
     precision_buy: float
     win_rate: float
     max_drawdown: float
+    buy_support: int = 0
+    exit_support: int = 0
+    buy_threshold: float = settings.MIN_SIGNAL_PROB
+    exit_threshold: float = 1.0 - settings.MIN_SIGNAL_PROB
+    entry_ready: bool = False
 
 
 @dataclass(slots=True)
@@ -280,11 +285,23 @@ class ModelRegistry:
 
     def _passes_promotion_floor(self, record: ModelRecord) -> bool:
         """Evita promociones por AUC aislada con perfil de trading debil."""
-        return (
+        standard_floor = (
             record.metrics.auc_val >= settings.MIN_MODEL_AUC
             and record.metrics.sharpe >= settings.MIN_MODEL_SHARPE_FOR_PROMOTION
             and record.metrics.max_drawdown <= settings.MAX_MODEL_DRAWDOWN_FOR_PROMOTION
+            and record.metrics.entry_ready
+            and record.metrics.buy_support >= settings.PROMOTION_MIN_BUY_SUPPORT
         )
+        # Track selectivo para modelos con threshold alto y pocas entradas, pero muy limpias.
+        selective_floor = (
+            record.metrics.buy_threshold >= settings.SELECTIVE_PROMOTION_MIN_THRESHOLD
+            and record.metrics.auc_val >= settings.SELECTIVE_PROMOTION_MIN_AUC
+            and record.metrics.sharpe >= settings.SELECTIVE_PROMOTION_MIN_SHARPE
+            and record.metrics.precision_buy >= settings.SELECTIVE_PROMOTION_MIN_PRECISION
+            and record.metrics.max_drawdown <= settings.SELECTIVE_PROMOTION_MAX_DRAWDOWN
+            and record.metrics.buy_support >= settings.SELECTIVE_PROMOTION_MIN_SUPPORT
+        )
+        return standard_floor or selective_floor
 
     def _load_records(self) -> list[ModelRecord]:
         return self.load_records_from_path(self.registry_path)

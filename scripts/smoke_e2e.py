@@ -96,10 +96,19 @@ async def main() -> None:
         await asyncio.sleep(0.2)
 
         sample = historical.iloc[:120].copy()
-        sequence = 1
+        message_sequence = 1
+        trade_sequence = 1
+        connection_key = "BTC-USDT"
         for _, row in sample.iterrows():
-            await collector._handle_message({"events": [{"trades": candle_to_trades(row, sequence)}]})
-            sequence += 4
+            await collector._handle_message(
+                {
+                    "sequence_num": message_sequence,
+                    "events": [{"trades": candle_to_trades(row, trade_sequence)}],
+                },
+                connection_key=connection_key,
+            )
+            message_sequence += 1
+            trade_sequence += 4
 
         last_row = sample.iloc[-1]
         forced = collector.candle_builder.force_close("BTC-USDT", int(last_row["open_time"]) + 59_000)

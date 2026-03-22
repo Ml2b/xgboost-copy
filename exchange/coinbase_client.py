@@ -195,6 +195,29 @@ class CoinbaseAdvancedTradeClient:
             raise RuntimeError(f"No hay libro disponible para {normalized_product_id}.")
         return results[normalized_product_id]
 
+    def get_best_bid_ask_public(self, product_id: str) -> dict[str, float]:
+        """Estima bid/ask del ultimo trade publico. Sin auth, para dry_run."""
+        response = self.public_client.get_public_market_trades(
+            product_id=product_id.strip().upper(),
+            limit=1,
+        )
+        payload = self._to_plain(response)
+        trades = list(payload.get("trades", []))
+        if not trades:
+            raise RuntimeError(f"Sin trades publicos para {product_id}.")
+        price = float(self._to_decimal(trades[0].get("price", 0)))
+        if price <= 0:
+            raise RuntimeError(f"Precio invalido en trades publicos para {product_id}.")
+        spread = price * 0.001
+        normalized = product_id.strip().upper()
+        return {
+            "product_id": normalized,
+            "bid": round(price - spread / 2, 8),
+            "ask": round(price + spread / 2, 8),
+            "mid": price,
+            "spread_pct": 0.001,
+        }
+
     def get_product_snapshot(self, product_id: str) -> CoinbaseProductSnapshot:
         """Carga metadata publica del producto spot."""
         response = self.public_client.get_public_product(product_id)

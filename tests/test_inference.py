@@ -6,9 +6,11 @@ import json
 from pathlib import Path
 
 import joblib
+import pandas as pd
 
 from model.inference import InferenceEngine
 from model.registry import MultiAssetModelRegistry
+from model.signal_bundle import FeatureDriftMonitor, MarketRegimeModel, ProbabilityCalibrator, SignalModelBundle
 
 
 class DummyRegistry:
@@ -155,6 +157,92 @@ def test_inference_keeps_signal_when_regime_gate_disabled(tmp_path) -> None:
     assert result["actionable"] == "true"
     assert result["regime"] == "disabled"
     assert result["regime_actionable"] == "true"
+
+
+def test_inference_uses_bundle_thresholds_and_drift_guard(tmp_path) -> None:
+    model_path = tmp_path / "bundle.pkl"
+    bundle = SignalModelBundle(
+        primary_model=DummyProbModel(),
+        secondary_model=None,
+        calibrator=ProbabilityCalibrator(method="identity"),
+        drift_monitor=FeatureDriftMonitor.fit(
+            pd.DataFrame(
+                {
+                    "f1": [0.1 * idx for idx in range(20)],
+                    "f2": [0.05 * idx for idx in range(20)],
+                    "f3": [0.03 * idx for idx in range(20)],
+                    "f4": [0.02 * idx for idx in range(20)],
+                    "f5": [0.04 * idx for idx in range(20)],
+                    "f6": [0.06 * idx for idx in range(20)],
+                    "f7": [0.07 * idx for idx in range(20)],
+                    "f8": [0.08 * idx for idx in range(20)],
+                }
+            )
+        ),
+        regime_model=MarketRegimeModel.fit(
+            pd.DataFrame(
+                {
+                    "realized_vol_5": [0.001 + (0.0001 * idx) for idx in range(120)],
+                    "bb_width": [0.005 + (0.0001 * idx) for idx in range(120)],
+                    "range_compression_20": [0.4 + (0.002 * idx) for idx in range(120)],
+                    "volume_ratio": [0.8 + (0.01 * idx) for idx in range(120)],
+                    "trend_slope_pct": [0.0001 * idx for idx in range(120)],
+                }
+            )
+        ),
+        feature_names=["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8"],
+        buy_threshold=0.75,
+        exit_threshold=0.25,
+    )
+    joblib.dump(bundle, model_path)
+    engine = InferenceEngine(DummyRegistry(str(model_path), ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8"]))  # type: ignore[arg-type]
+
+    hold_result = engine.predict_signal(
+        {
+                "product_id": "BTC-USD",
+                "f1": 0.72,
+                "f2": 0.10,
+                "f3": 0.10,
+                "f4": 0.10,
+                "f5": 0.10,
+                "f6": 0.10,
+                "f7": 0.10,
+                "f8": 0.10,
+                "realized_vol_5": 0.002,
+                "range_compression_20": 0.8,
+                "bb_width": 0.01,
+            "volume_ratio": 1.1,
+            "trend_slope_pct": 0.001,
+        }
+    )
+    drift_result = engine.predict_signal(
+        {
+                "product_id": "BTC-USD",
+                "f1": 50.0,
+                "f2": 60.0,
+                "f3": 70.0,
+                "f4": 80.0,
+                "f5": 90.0,
+                "f6": 100.0,
+                "f7": 110.0,
+                "f8": 120.0,
+                "realized_vol_5": 0.002,
+                "range_compression_20": 0.8,
+                "bb_width": 0.01,
+            "volume_ratio": 1.1,
+            "trend_slope_pct": 0.001,
+        }
+    )
+
+    assert hold_result is not None
+    assert hold_result["signal"] == "HOLD"
+    assert hold_result["buy_threshold"] == 0.75
+    assert hold_result["sell_threshold"] == 0.25
+
+    assert drift_result is not None
+    assert drift_result["signal"] == "HOLD"
+    assert drift_result["drift_actionable"] == "false"
+    assert drift_result["reason"] == "drift_blocked_out_of_distribution"
 
 
 def _write_asset(root: Path, registry_key: str, feature_names: list[str], promoted: bool) -> None:

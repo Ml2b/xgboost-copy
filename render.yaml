@@ -60,6 +60,8 @@ services:
         value: "0.60"
       - key: SELECTIVE_PROMOTION_MAX_DRAWDOWN
         value: "0.10"
+      - key: PROMOTION_MIN_BUY_SUPPORT
+        value: "15"
 
   - type: keyvalue
     name: xgboost-redis

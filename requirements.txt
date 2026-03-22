@@ -1,4 +1,6 @@
 xgboost
+lightgbm
+hmmlearn
 scikit-learn
 shap
 numpy

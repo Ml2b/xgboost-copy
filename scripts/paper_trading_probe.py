@@ -26,6 +26,15 @@ from paper.paper_trader import PaperTrader
 from scripts.live_multi_asset_probe import _prime_feature_buffers
 
 
+async def _ensure_group(redis_client: fakeredis.aioredis.FakeRedis, stream: str, group: str) -> None:
+    """Crea un consumer group desde el inicio del stream para no perder mensajes de arranque."""
+    try:
+        await redis_client.xgroup_create(stream, group, id="0", mkstream=True)
+    except Exception as exc:
+        if "BUSYGROUP" not in str(exc):
+            raise
+
+
 async def main() -> None:
     """Ejecuta un probe controlado con feed publico + paper trader."""
     seconds = int(os.getenv("LIVE_PROBE_SECONDS", "90"))
@@ -48,14 +57,19 @@ async def main() -> None:
     inference = InferenceEngine(registry=registry, redis_client=redis_async)
     paper_trader = PaperTrader(redis_client=redis_async)
     _prime_feature_buffers(feature_engine, products)
+    await _ensure_group(redis_async, settings.STREAM_MARKET_CANDLES_1M, "feature-engine")
+    await _ensure_group(redis_async, settings.STREAM_MARKET_FEATURES, "inference-engine")
+    await _ensure_group(redis_async, settings.STREAM_MARKET_CANDLES_1M, "paper-trader-candles")
+    await _ensure_group(redis_async, settings.STREAM_INFERENCE_SIGNALS, "paper-trader-signals")
 
     stop_event = asyncio.Event()
     tasks = [
-        asyncio.create_task(collector.start(stop_event)),
         asyncio.create_task(feature_engine.start(stop_event)),
         asyncio.create_task(inference.start(stop_event)),
         asyncio.create_task(paper_trader.start(stop_event)),
     ]
+    await asyncio.sleep(0.25)
+    tasks.append(asyncio.create_task(collector.start(stop_event)))
 
     try:
         await asyncio.sleep(seconds)

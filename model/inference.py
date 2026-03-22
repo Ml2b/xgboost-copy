@@ -31,6 +31,19 @@ class RegimeDecision:
     regime: str
     actionable: bool
     reason: str
+    backend: str = "heuristic"
+
+
+@dataclass(slots=True)
+class DriftDecision:
+    """Resultado del monitoreo de drift de features."""
+
+    status: str
+    actionable: bool
+    reason: str
+    outlier_ratio: float = 0.0
+    outlier_count: int = 0
+    checked_features: int = 0
 
 
 class InferenceEngine:
@@ -167,20 +180,23 @@ class InferenceEngine:
         row = [float(payload.get(name, 0.0)) for name in bundle.artifact.feature_names]
         frame = pd.DataFrame([row], columns=bundle.artifact.feature_names)
         prob_buy = float(self._predict_proba(bundle.model, frame)[0])
-        buy_threshold, sell_threshold = self._resolve_signal_thresholds(product_id)
-        regime = self._evaluate_regime(payload)
-        effective_actionable = bundle.artifact.actionable and regime.actionable
+        buy_threshold, sell_threshold = self._resolve_signal_thresholds(product_id, bundle.model)
+        regime = self._evaluate_regime(payload, bundle.model)
+        drift = self._evaluate_drift(payload, bundle.model, bundle.artifact.feature_names)
+        effective_actionable = bundle.artifact.actionable and regime.actionable and drift.actionable
 
         signal = "HOLD"
         if prob_buy >= buy_threshold:
             signal = "BUY"
         elif prob_buy <= sell_threshold:
             signal = "EXIT_LONG"
-        if signal != "HOLD" and not regime.actionable:
+        if signal != "HOLD" and not (regime.actionable and drift.actionable):
             signal = "HOLD"
 
         reason = bundle.artifact.reason
-        if bundle.artifact.actionable and not regime.actionable:
+        if bundle.artifact.actionable and not drift.actionable:
+            reason = drift.reason
+        elif bundle.artifact.actionable and not regime.actionable:
             reason = regime.reason
 
         latency_ms = (time.perf_counter() - started) * 1000.0
@@ -202,6 +218,14 @@ class InferenceEngine:
             "sell_threshold": round(sell_threshold, 6),
             "regime": regime.regime,
             "regime_actionable": str(regime.actionable).lower(),
+            "regime_backend": regime.backend,
+            "drift_status": drift.status,
+            "drift_actionable": str(drift.actionable).lower(),
+            "drift_outlier_ratio": round(drift.outlier_ratio, 6),
+            "drift_outlier_count": drift.outlier_count,
+            "drift_checked_features": drift.checked_features,
+            "calibration_method": str(getattr(bundle.model, "calibration_method", "identity")),
+            "bundle_version": str(getattr(bundle.model, "bundle_version", "")),
             "signal_contract": settings.SIGNAL_CONTRACT,
         }
 
@@ -310,13 +334,17 @@ class InferenceEngine:
         for key in stale_keys:
             self._loaded_models.pop(key, None)
 
-    def _resolve_signal_thresholds(self, product_id: str) -> tuple[float, float]:
+    def _resolve_signal_thresholds(self, product_id: str, runtime_model: object | None = None) -> tuple[float, float]:
         base_asset = product_id.strip().split("-", 1)[0].upper() if product_id else ""
-        buy_threshold = float(self.buy_thresholds_by_base.get(base_asset, settings.MIN_SIGNAL_PROB))
+        default_buy_threshold = float(getattr(runtime_model, "buy_threshold", settings.MIN_SIGNAL_PROB))
+        default_sell_threshold = float(
+            getattr(runtime_model, "exit_threshold", 1.0 - settings.MIN_SIGNAL_PROB)
+        )
+        buy_threshold = float(self.buy_thresholds_by_base.get(base_asset, default_buy_threshold))
         sell_threshold = float(
             self.sell_thresholds_by_base.get(
                 base_asset,
-                1.0 - settings.MIN_SIGNAL_PROB,
+                default_sell_threshold,
             )
         )
         buy_threshold = min(max(buy_threshold, 0.0), 1.0)
@@ -325,8 +353,16 @@ class InferenceEngine:
             sell_threshold = buy_threshold
         return buy_threshold, sell_threshold
 
-    def _evaluate_regime(self, payload: dict[str, Any]) -> RegimeDecision:
+    def _evaluate_regime(self, payload: dict[str, Any], runtime_model: object | None = None) -> RegimeDecision:
         """Bloquea ejecucion en regimenes extremos definidos por heuristicas."""
+        if runtime_model is not None and hasattr(runtime_model, "evaluate_regime_payload"):
+            result = runtime_model.evaluate_regime_payload(payload)
+            return RegimeDecision(
+                regime=str(result.regime),
+                actionable=bool(result.actionable),
+                reason=str(result.reason),
+                backend=str(getattr(result, "backend", "bundle")),
+            )
         if not self.regime_gate_enabled:
             return RegimeDecision(regime="disabled", actionable=True, reason="regime_gate_disabled")
 
@@ -341,6 +377,7 @@ class InferenceEngine:
                 regime="extreme_volatility",
                 actionable=False,
                 reason="regime_blocked_extreme_volatility",
+                backend="heuristic",
             )
 
         if (
@@ -351,9 +388,36 @@ class InferenceEngine:
                 regime="compressed",
                 actionable=False,
                 reason="regime_blocked_compression",
+                backend="heuristic",
             )
 
-        return RegimeDecision(regime="normal", actionable=True, reason="ok")
+        return RegimeDecision(regime="normal", actionable=True, reason="ok", backend="heuristic")
+
+    def _evaluate_drift(
+        self,
+        payload: dict[str, Any],
+        runtime_model: object | None,
+        feature_names: list[str],
+    ) -> DriftDecision:
+        """Bloquea inferencias cuando demasiadas features estan fuera de rango."""
+        if runtime_model is not None and hasattr(runtime_model, "evaluate_drift_payload"):
+            result = runtime_model.evaluate_drift_payload(payload)
+            return DriftDecision(
+                status=str(result.status),
+                actionable=bool(result.actionable),
+                reason=str(result.reason),
+                outlier_ratio=float(getattr(result, "outlier_ratio", 0.0)),
+                outlier_count=int(getattr(result, "outlier_count", 0)),
+                checked_features=int(getattr(result, "checked_features", 0)),
+            )
+        return DriftDecision(
+            status="disabled",
+            actionable=True,
+            reason="drift_monitor_disabled",
+            outlier_ratio=0.0,
+            outlier_count=0,
+            checked_features=len(feature_names),
+        )
 
     def _log_runtime_summary(self) -> None:
         """Resume inferencia para los logs de Render."""
@@ -396,6 +460,14 @@ class InferenceEngine:
             "sell_threshold": sell_threshold,
             "regime": "no_model",
             "regime_actionable": "false",
+            "regime_backend": "none",
+            "drift_status": "no_model",
+            "drift_actionable": "false",
+            "drift_outlier_ratio": 0.0,
+            "drift_outlier_count": 0,
+            "drift_checked_features": 0,
+            "calibration_method": "identity",
+            "bundle_version": "",
             "signal_contract": settings.SIGNAL_CONTRACT,
         }
 

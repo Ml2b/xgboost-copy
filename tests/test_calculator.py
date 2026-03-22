@@ -38,3 +38,13 @@ def test_calculator_builds_new_features_without_trade_count() -> None:
     assert result["realized_vol_5"].notna().all()
     assert result["vwap_20_distance"].notna().all()
     assert result["range_compression_20"].notna().all()
+
+
+def test_calculator_uses_proxy_when_trade_count_is_partial() -> None:
+    df = make_synthetic_candles(220, seed=29)
+    df["trade_count"] = float("nan")
+    df.loc[df.index[-5:], "trade_count"] = 12.0
+    result = FeatureCalculator().compute(df)
+    assert not result.empty
+    assert result["trade_intensity_20"].notna().all()
+    assert (result["trade_intensity_20"] > 0).all()

@@ -150,9 +150,7 @@ class FeatureSelector:
             )
             sample = X_val.iloc[: min(500, len(X_val))]
             shap_values = explainer.shap_values(sample)
-            if isinstance(shap_values, list):
-                shap_values = shap_values[-1]
-            importance = np.abs(np.asarray(shap_values)).mean(axis=0)
+            importance = self._collapse_shap_importance(shap_values, len(feature_names))
             return {name: float(value) for name, value in zip(feature_names, importance)}
         except Exception as exc:
             warnings.warn(
@@ -179,6 +177,35 @@ class FeatureSelector:
 
         uniform = 1.0 / max(len(feature_names), 1)
         return {name: uniform for name in feature_names}
+
+    @staticmethod
+    def _collapse_shap_importance(shap_values: object, feature_count: int) -> np.ndarray:
+        """Colapsa salidas SHAP 2D/3D a una sola importancia por feature."""
+        raw_values = getattr(shap_values, "values", shap_values)
+        if isinstance(raw_values, list):
+            raw_values = raw_values[-1]
+        values = np.abs(np.asarray(raw_values, dtype=float))
+
+        if values.ndim == 1:
+            if values.shape[0] != feature_count:
+                raise ValueError("SHAP 1D no coincide con la cantidad de features.")
+            return values
+
+        if values.ndim == 2:
+            if values.shape[1] == feature_count:
+                return values.mean(axis=0)
+            if values.shape[0] == feature_count:
+                return values.mean(axis=1)
+            raise ValueError("SHAP 2D no expone un eje de features reconocible.")
+
+        feature_axis = next(
+            (axis for axis, size in enumerate(values.shape) if size == feature_count),
+            None,
+        )
+        if feature_axis is None:
+            raise ValueError("SHAP ND no expone un eje de features reconocible.")
+        collapsed = np.moveaxis(values, feature_axis, 0)
+        return collapsed.reshape(feature_count, -1).mean(axis=1)
 
     def _compute_permutation_importance(
         self,

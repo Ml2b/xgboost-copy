@@ -20,6 +20,14 @@ from data.history_store import CandleHistoryStore
 from features.calculator import FeatureCalculator
 from features.selector import SelectorConfig
 from model.registry import ModelMetrics, ModelRecord, ModelRegistry, MultiAssetModelRegistry
+from model.signal_bundle import (
+    FeatureDriftMonitor,
+    MarketRegimeModel,
+    ProbabilityCalibrator,
+    SignalModelBundle,
+    SignalThresholdOptimizer,
+    build_lightgbm_classifier,
+)
 from target.builder import TargetBuilder, TargetConfig, TargetType
 from validation.walk_forward import (
     WalkForwardConfig,
@@ -231,9 +239,16 @@ class Trainer:
         active_model_path = self.registry.get_active_model_path()
         active_feature_names = self.registry.get_active_feature_names()
         can_continue = active_feature_names == feature_names
-        if active_model_path and Path(active_model_path).exists() and can_continue:
+        used_continuation = False
+        primary_xgb_model = None
+        if (
+            active_model_path
+            and Path(active_model_path).exists()
+            and can_continue
+            and Path(active_model_path).suffix == ".json"
+        ):
             try:
-                model = self._fit_model_instance(
+                primary_xgb_model = self._fit_model_instance(
                     X_train,
                     y_train,
                     X_val,
@@ -242,11 +257,21 @@ class Trainer:
                     sample_weight_val=w_val,
                     xgb_model=active_model_path,
                 )
-                return model, True
+                used_continuation = True
             except Exception:
-                pass
+                primary_xgb_model = None
+                used_continuation = False
 
-        model = self._fit_model_instance(
+        if primary_xgb_model is None:
+            primary_xgb_model = self._fit_model_instance(
+                X_train,
+                y_train,
+                X_val,
+                y_val,
+                sample_weight_train=w_train,
+                sample_weight_val=w_val,
+            )
+        secondary_model = self._fit_lightgbm_model(
             X_train,
             y_train,
             X_val,
@@ -254,7 +279,41 @@ class Trainer:
             sample_weight_train=w_train,
             sample_weight_val=w_val,
         )
-        return model, False
+        raw_val_probs = self._blend_validation_probs(primary_xgb_model, secondary_model, X_val)
+        calibrator = ProbabilityCalibrator.fit(raw_val_probs, y_val)
+        calibrated_val_probs = calibrator.transform(raw_val_probs)
+        target_returns = (
+            df.iloc[val_start:]["target_return"].to_numpy(dtype=float)
+            if "target_return" in df.columns
+            else np.zeros(len(X_val), dtype=float)
+        )
+        threshold_result = SignalThresholdOptimizer.optimize(
+            calibrated_val_probs,
+            target_returns,
+            y_val,
+        )
+        bundle = SignalModelBundle(
+            primary_model=primary_xgb_model,
+            secondary_model=secondary_model,
+            calibrator=calibrator,
+            drift_monitor=FeatureDriftMonitor.fit(df[feature_names], feature_names=feature_names),
+            regime_model=MarketRegimeModel.fit(df),
+            feature_names=list(feature_names),
+            buy_threshold=threshold_result.buy_threshold,
+            exit_threshold=threshold_result.exit_threshold,
+            primary_model_name="xgboost",
+            secondary_model_name="lightgbm" if secondary_model is not None else None,
+            calibration_method=calibrator.method,
+            threshold_metadata={
+                "buy_score": round(threshold_result.buy_score, 6),
+                "exit_score": round(threshold_result.exit_score, 6),
+                "buy_support": threshold_result.buy_support,
+                "exit_support": threshold_result.exit_support,
+                "buy_precision": threshold_result.buy_precision,
+                "entry_ready": threshold_result.entry_ready,
+            },
+        )
+        return bundle, used_continuation
 
     def _compute_holdout_metrics(self, df: pd.DataFrame, feature_names: list[str], model: object) -> ModelMetrics:
         X_val = df[feature_names]
@@ -267,8 +326,21 @@ class Trainer:
             auc = float(roc_auc_score(y_val, probs))
         except ValueError:
             auc = 0.5
-        buy_preds = (probs >= settings.MIN_SIGNAL_PROB).astype(int)
+        buy_threshold = float(getattr(model, "buy_threshold", settings.MIN_SIGNAL_PROB))
+        buy_preds = (probs >= buy_threshold).astype(int)
         precision_buy = float(precision_score(y_val, buy_preds, zero_division=0))
+        threshold_metadata = getattr(model, "threshold_metadata", {})
+        buy_support = int(threshold_metadata.get("buy_support", int(buy_preds.sum())))
+        exit_support = int(threshold_metadata.get("exit_support", 0))
+        entry_ready = bool(
+            threshold_metadata.get(
+                "entry_ready",
+                buy_support >= settings.PROMOTION_MIN_BUY_SUPPORT,
+            )
+        )
+        exit_threshold = float(
+            getattr(model, "exit_threshold", max(0.05, 1.0 - settings.MIN_SIGNAL_PROB))
+        )
 
         returns = df["target_return"].to_numpy(dtype=float)
         trade_returns = returns[buy_preds == 1]
@@ -281,6 +353,11 @@ class Trainer:
             precision_buy=precision_buy,
             win_rate=win_rate,
             max_drawdown=max_drawdown,
+            buy_support=buy_support,
+            exit_support=exit_support,
+            buy_threshold=buy_threshold,
+            exit_threshold=exit_threshold,
+            entry_ready=entry_ready,
         )
 
     @staticmethod
@@ -358,6 +435,60 @@ class Trainer:
             from sklearn.ensemble import HistGradientBoostingClassifier
 
             return HistGradientBoostingClassifier(max_depth=4, learning_rate=0.05, random_state=42)
+
+    def _fit_lightgbm_model(
+        self,
+        X_train: pd.DataFrame,
+        y_train: np.ndarray,
+        X_val: pd.DataFrame,
+        y_val: np.ndarray,
+        sample_weight_train: np.ndarray | None = None,
+        sample_weight_val: np.ndarray | None = None,
+    ) -> object | None:
+        """Entrena LightGBM si esta disponible; si no, se omite sin romper el flujo."""
+        model = build_lightgbm_classifier()
+        if model is None:
+            return None
+        fit_sig = inspect.signature(model.fit)
+        fit_kwargs: dict[str, object] = {}
+        if "eval_set" in fit_sig.parameters:
+            fit_kwargs["eval_set"] = [(X_val, y_val)]
+        if sample_weight_train is not None and "sample_weight" in fit_sig.parameters:
+            fit_kwargs["sample_weight"] = sample_weight_train
+        if sample_weight_val is not None and "eval_sample_weight" in fit_sig.parameters:
+            fit_kwargs["eval_sample_weight"] = [sample_weight_val]
+        if "callbacks" in fit_sig.parameters:
+            try:
+                from lightgbm import early_stopping, log_evaluation  # type: ignore
+
+                fit_kwargs["callbacks"] = [
+                    early_stopping(30, verbose=False),
+                    log_evaluation(period=0),
+                ]
+            except Exception:
+                pass
+        if "verbose" in fit_sig.parameters:
+            fit_kwargs["verbose"] = -1
+        try:
+            model.fit(X_train, y_train, **fit_kwargs)
+        except TypeError:
+            fit_kwargs.pop("verbose", None)
+            fit_kwargs.pop("callbacks", None)
+            model.fit(X_train, y_train, **fit_kwargs)
+        return model
+
+    def _blend_validation_probs(
+        self,
+        primary_model: object,
+        secondary_model: object | None,
+        X_val: pd.DataFrame,
+    ) -> np.ndarray:
+        """Promedia boosters disponibles antes de calibrar probabilidades."""
+        probabilities = [self._predict_proba(primary_model, X_val)]
+        if secondary_model is not None:
+            probabilities.append(self._predict_proba(secondary_model, X_val))
+        stacked = np.vstack(probabilities)
+        return np.mean(stacked, axis=0)
 
 
 class MultiAssetTrainerService:

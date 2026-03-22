@@ -53,7 +53,35 @@ function Get-BridgeConfig {
         }
     }
 
-    return Get-Content -Raw $BridgePath | ConvertFrom-Json
+    $config = Get-Content -Raw $BridgePath | ConvertFrom-Json
+    if ([string]::IsNullOrWhiteSpace($config.workspaceRoot) -or $config.workspaceRoot -ne $WorkspaceRoot) {
+        $config.workspaceRoot = $WorkspaceRoot
+    }
+
+    return $config
+}
+
+function Save-BridgeConfig {
+    param(
+        [Parameter(Mandatory = $true)]
+        [psobject]$BridgeConfig
+    )
+
+    if (-not (Test-Path (Split-Path -Parent $BridgePath))) {
+        New-Item -ItemType Directory -Force (Split-Path -Parent $BridgePath) | Out-Null
+    }
+
+    $serializable = [ordered]@{
+        enabled = [bool]$BridgeConfig.enabled
+        workspaceRoot = "$WorkspaceRoot"
+        defaultEnvironmentId = "$($BridgeConfig.defaultEnvironmentId)"
+        defaultAttempts = [int]$BridgeConfig.defaultAttempts
+        defaultBranch = "$($BridgeConfig.defaultBranch)"
+        modes = @($BridgeConfig.modes)
+        notes = "$($BridgeConfig.notes)"
+    }
+
+    $serializable | ConvertTo-Json -Depth 10 | Set-Content -Encoding UTF8 $BridgePath
 }
 
 function Get-TemplateText {
@@ -207,6 +235,8 @@ function Submit-CloudTask {
 
     $envIdToUse = if (-not [string]::IsNullOrWhiteSpace($EnvironmentId)) {
         $EnvironmentId
+    } elseif (($latest = Get-LatestRecordedTask) -and -not [string]::IsNullOrWhiteSpace($latest.environmentId)) {
+        $latest.environmentId
     } else {
         $bridge.defaultEnvironmentId
     }
@@ -271,6 +301,10 @@ function Submit-CloudTask {
     }
 
     $path = Save-TaskRecord -Record $record
+    if ([string]::IsNullOrWhiteSpace($bridge.defaultEnvironmentId) -or $bridge.defaultEnvironmentId -ne $envIdToUse) {
+        $bridge.defaultEnvironmentId = $envIdToUse
+        Save-BridgeConfig -BridgeConfig $bridge
+    }
 
     [pscustomobject]@{
         path = $path
