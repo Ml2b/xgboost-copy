@@ -285,7 +285,7 @@ class OrderManager:
                 "signal": signal,
                 "risk_pct": sizing_decision.risk_pct,
                 "prob_buy": prob_buy,
-                "spread_pct": best_bid_ask["spread_pct"],
+                "spread_pct": float(best_bid_ask.get("spread_pct", 0.0)),
                 "timestamp_ms": current_timestamp_ms,
             }
             accepted, reason = self.guardian.check(risk_payload, product_id, portfolio)
@@ -300,7 +300,7 @@ class OrderManager:
                     registry_key=registry_key,
                     actionable=False,
                     reason=reason,
-                    spread_pct=best_bid_ask["spread_pct"],
+                    spread_pct=float(best_bid_ask.get("spread_pct", 0.0)),
                     dry_run=self.dry_run,
                     latency_ms=self._elapsed_ms(started),
                     sizing_notional_usd=round(sizing_decision.notional_usd, 6),
