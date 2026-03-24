@@ -103,13 +103,18 @@ class Trainer:
     def _retrain_cycle(self) -> RetrainCycleResult:
         """Ejecuta el pipeline completo de reentrenamiento."""
         candles = self._load_candles()
-        if candles is None or len(candles) < max(200, self.walk_forward_config.min_train_size + 50):
+        wf = self.walk_forward_config
+        # Umbral real: walk-forward necesita min_train + gap + splits filas,
+        # y reserva test_size_pct, asi que el total minimo es mayor.
+        _wf_min = wf.min_train_size + wf.gap_periods + wf.n_splits + 1
+        _min_rows = int(_wf_min / (1.0 - wf.test_size_pct)) + 1
+        if candles is None or len(candles) < _min_rows:
             return RetrainCycleResult(status="insufficient_data", history_rows=0 if candles is None else len(candles))
 
         df_order_flow = self._load_order_flow()
         features_df = self.calculator.compute(candles, df_order_flow=df_order_flow)
         labeled_df = self.target_builder.build(features_df)
-        if len(labeled_df) < max(200, self.walk_forward_config.min_train_size + 50):
+        if len(labeled_df) < _min_rows:
             return RetrainCycleResult(status="insufficient_data", history_rows=len(labeled_df))
 
         feature_cols = [
