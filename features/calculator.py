@@ -215,6 +215,13 @@ class FeatureCalculator:
                     "microprice_shift": 0.0,
                     "spread": float("nan"),
                     "relative_spread": float("nan"),
+                    # Cancelacion: sin L2 no hay info → NaN (missing)
+                    "cancelled_bid_vol": float("nan"),
+                    "cancelled_ask_vol": float("nan"),
+                    "bid_cancel_ratio": float("nan"),
+                    "ask_cancel_ratio": float("nan"),
+                    "phantom_bid_vol": float("nan"),
+                    "cancel_asymmetry": float("nan"),
                 }
                 for col in raw_cols:
                     sentinel = _NEUTRAL_SENTINELS.get(col, 0.0)

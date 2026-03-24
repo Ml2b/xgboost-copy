@@ -112,11 +112,14 @@ class CollectorWithCandles:
 
     async def _run_socket_loop(self, products: list[str], stop_event: asyncio.Event) -> None:
         """Mantiene una conexion viva para un subconjunto de productos."""
+        import time as _time
+
         backoff = 2
         attempts = 0
         connection_key = self._connection_key(products)
         logger.info("Collector socket loop iniciado. connection_key={}", connection_key)
         while not stop_event.is_set():
+            t0 = _time.monotonic()
             try:
                 await self._run_socket(products, stop_event)
                 backoff = 2
@@ -124,11 +127,17 @@ class CollectorWithCandles:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
+                elapsed = _time.monotonic() - t0
+                if elapsed > 120:
+                    # Conexion estable >2min: resetear contador
+                    attempts = 0
+                    backoff = 2
                 attempts += 1
                 logger.warning(
-                    "Collector websocket reconectando. connection_key={} attempt={} error={}",
+                    "Collector websocket reconectando. connection_key={} attempt={} elapsed={:.0f}s error={}",
                     connection_key,
                     attempts,
+                    elapsed,
                     exc,
                 )
                 await self._publish_error(
@@ -154,7 +163,7 @@ class CollectorWithCandles:
 
         connection_key = self._connection_key(products)
         self._last_heartbeat_counter_by_connection.pop(connection_key, None)
-        async with websockets.connect(self.websocket_url, ping_interval=20, ping_timeout=20) as websocket:
+        async with websockets.connect(self.websocket_url, ping_interval=20, ping_timeout=20, max_size=20 * 1024 * 1024) as websocket:
             logger.info(
                 "Collector websocket conectado. connection_key={} products={} auth={}",
                 connection_key,

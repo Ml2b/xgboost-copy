@@ -71,6 +71,13 @@ ORDER_FLOW_BOOK_DYNAMICS_COLUMNS: list[str] = [
     "refill_rate_bid",
     "cancel_rate_ask",
     "cancel_rate_bid",
+    # --- Cancellation/execution separation ---
+    "cancelled_bid_vol",
+    "cancelled_ask_vol",
+    "bid_cancel_ratio",
+    "ask_cancel_ratio",
+    "phantom_bid_vol",
+    "cancel_asymmetry",
 ]
 
 # Todas las columnas raw (se almacenan en Redis stream y SQLite)
@@ -344,8 +351,20 @@ class BookDepthTracker:
 
         bid10 = metrics["bid_depth_top10"]
         ask10 = metrics["ask_depth_top10"]
-        tot10 = bid10 + ask10
-        metrics["depth_imbalance_top10"] = (bid10 - ask10) / tot10 if tot10 > 0 else 0.0
+
+        # --- WBI ponderado por 1/rank (Weight Book Imbalance) ---
+        # Cada nivel recibe peso 1/rank, lo que da mas importancia a niveles
+        # cercanos al mid sin necesitar volumen bruto.
+        def wbi_by_rank(levels: list[float], book: dict, n: int) -> float:
+            total = 0.0
+            for rank, price in enumerate(levels[:n], start=1):
+                total += book.get(price, 0.0) / rank
+            return total
+
+        wbi_bid = wbi_by_rank(sorted_bids, bids, 10)
+        wbi_ask = wbi_by_rank(sorted_asks, asks, 10)
+        wbi_total = wbi_bid + wbi_ask
+        metrics["depth_imbalance_top10"] = (wbi_bid - wbi_ask) / wbi_total if wbi_total > 0 else 0.0
 
         # --- Pendiente de profundidad (depth slope) ---
         def depth_slope(levels: list[float], book: dict, n: int = 5) -> float:
@@ -435,6 +454,35 @@ class BookDepthTracker:
         cancel_bid = max(0.0, bid_removed - sell_volume) / start_bid10 if start_bid10 > 0 else 0.0
         metrics["cancel_rate_ask"] = float(np.clip(cancel_ask, 0.0, 5.0))
         metrics["cancel_rate_bid"] = float(np.clip(cancel_bid, 0.0, 5.0))
+
+        # --- Cancellation vs execution separation ---
+        # cancelled_*_vol: liquidez que desaparecio SIN ser ejecutada por trades
+        cancelled_bid = max(0.0, bid_removed - sell_volume)
+        cancelled_ask = max(0.0, ask_removed - buy_volume)
+        metrics["cancelled_bid_vol"] = cancelled_bid
+        metrics["cancelled_ask_vol"] = cancelled_ask
+
+        # cancel_ratio: fraccion de la liquidez removida que fue cancelacion
+        total_bid_removed = bid_removed
+        total_ask_removed = ask_removed
+        metrics["bid_cancel_ratio"] = (
+            cancelled_bid / total_bid_removed if total_bid_removed > 0 else 0.0
+        )
+        metrics["ask_cancel_ratio"] = (
+            cancelled_ask / total_ask_removed if total_ask_removed > 0 else 0.0
+        )
+
+        # phantom_bid_vol: ordenes bid que aparecieron y se cancelaron
+        # en la misma ventana (aparecieron como added, luego removidas sin ejecucion)
+        # Proxy: min(bid_added, cancelled_bid) — la parte que entro y salio
+        phantom_bid = min(bid_added, cancelled_bid)
+        metrics["phantom_bid_vol"] = phantom_bid
+
+        # cancel_asymmetry: sesgo de cancelacion bid vs ask [-1, 1]
+        cancel_total = cancelled_bid + cancelled_ask
+        metrics["cancel_asymmetry"] = (
+            (cancelled_bid - cancelled_ask) / cancel_total if cancel_total > 0 else 0.0
+        )
 
         # Guardar estado inicial para proxima ventana
         self._window_start_ask_depth10[product_id] = ask10
