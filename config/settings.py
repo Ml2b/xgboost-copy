@@ -220,6 +220,7 @@ FEE_PCT: Final[float] = 0.05
 
 # Reentrenamiento y senales
 RETRAIN_INTERVAL: Final[int] = 2 * 3600
+TRAINER_HISTORY_SYNC_INTERVAL: Final[int] = int(os.getenv("TRAINER_HISTORY_SYNC_INTERVAL", "300"))
 MIN_MODEL_AUC: Final[float] = 0.53
 MIN_MODEL_SHARPE_FOR_PROMOTION: Final[float] = float(
     os.getenv("MIN_MODEL_SHARPE_FOR_PROMOTION", "0.1")

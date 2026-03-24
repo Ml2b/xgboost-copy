@@ -550,10 +550,27 @@ class MultiAssetTrainerService:
         """Loop asyncrono que recorre los assets y dispara su trainer dedicado."""
         stop_event = stop_event or asyncio.Event()
         logger.info(
-            "MultiAssetTrainerService iniciado. registry_root={} retrain_interval_s={}",
+            "MultiAssetTrainerService iniciado. registry_root={} retrain_interval_s={} sync_interval_s={}",
             self.registry_root,
             self.retrain_interval,
+            settings.TRAINER_HISTORY_SYNC_INTERVAL,
         )
+        await asyncio.gather(
+            self._sync_loop(stop_event),
+            self._retrain_loop(stop_event),
+        )
+
+    async def _sync_loop(self, stop_event: asyncio.Event) -> None:
+        """Sincroniza velas y order flow de Redis → SQLite cada TRAINER_HISTORY_SYNC_INTERVAL segundos."""
+        while not stop_event.is_set():
+            await asyncio.to_thread(self._sync_history)
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=settings.TRAINER_HISTORY_SYNC_INTERVAL)
+            except asyncio.TimeoutError:
+                continue
+
+    async def _retrain_loop(self, stop_event: asyncio.Event) -> None:
+        """Reentrena todos los activos cada retrain_interval segundos."""
         while not stop_event.is_set():
             await asyncio.to_thread(self._retrain_all_assets)
             self.multi_registry.refresh()

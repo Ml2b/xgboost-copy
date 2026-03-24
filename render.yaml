@@ -24,6 +24,12 @@ services:
         value: /opt/render/project/src/runtime/trainer_candle_history.sqlite3
       - key: PYTHONUNBUFFERED
         value: "1"
+      - key: COINBASE_WS_PRODUCTS_PER_CONNECTION
+        value: "5"
+      - key: COINBASE_CANDLE_RECONCILE_LOOKBACK_MINUTES
+        value: "15"
+      - key: TRAINER_HISTORY_SYNC_INTERVAL
+        value: "300"
       - key: RENDER_HISTORY_BOOTSTRAP_ENABLED
         value: "true"
       - key: RENDER_HISTORY_BOOTSTRAP_TARGET_ROWS
