@@ -32,6 +32,11 @@ class CollectorStats:
     lag_ms_total: float = 0.0
     lag_samples: int = 0
     lag_ema_ms: float = 0.0
+    of_published: int = 0
+    of_none: int = 0
+    of_errors: int = 0
+    l2_messages: int = 0
+    l2_errors: int = 0
 
     @property
     def avg_lag_ms(self) -> float:
@@ -176,7 +181,10 @@ class CollectorWithCandles:
         await self._track_connection_sequence(message, connection_key)
         try:
             self._handle_level2_message(message)
+            if str(message.get("channel", "")).lower() == settings.COINBASE_LEVEL2_CHANNEL:
+                self.stats.l2_messages += 1
         except Exception as exc:
+            self.stats.l2_errors += 1
             logger.warning("Collector L2 processing error ignorado: {}", exc)
         for trade in self._extract_trades(message):
             if not self._is_valid_trade(trade):
@@ -229,7 +237,11 @@ class CollectorWithCandles:
                                 settings.STREAM_MARKET_ORDER_FLOW_1M,
                                 {k: str(v) for k, v in of_metrics.items()},
                             )
+                            self.stats.of_published += 1
+                        else:
+                            self.stats.of_none += 1
                     except Exception as exc:
+                        self.stats.of_errors += 1
                         logger.warning(
                             "Collector order_flow close_window error: product={} error={}",
                             product_id,
@@ -440,6 +452,11 @@ class CollectorWithCandles:
                     "duplicates": self.stats.duplicates,
                     "gaps": self.stats.gaps,
                     "avg_lag_ms": round(self.stats.avg_lag_ms, 3),
+                    "of_published": self.stats.of_published,
+                    "of_none": self.stats.of_none,
+                    "of_errors": self.stats.of_errors,
+                    "l2_messages": self.stats.l2_messages,
+                    "l2_errors": self.stats.l2_errors,
                 },
             )
             self._log_runtime_summary()
