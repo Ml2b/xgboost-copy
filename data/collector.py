@@ -17,6 +17,7 @@ from loguru import logger
 from config import settings
 from data.candle_builder import CandleBuilder
 from exchange.coinbase_client import CoinbaseAdvancedTradeClient
+from features.order_flow import OrderFlowAggregator
 
 
 @dataclass(slots=True)
@@ -76,6 +77,7 @@ class CollectorWithCandles:
         self._last_published_candle_open_by_product: dict[str, int] = {}
         self._last_reconcile_started_at_by_product: dict[str, float] = {}
         self._last_runtime_log_at = 0.0
+        self._order_flow_agg = OrderFlowAggregator()
 
     async def start(self, stop_event: asyncio.Event | None = None) -> None:
         """Arranca una o varias conexiones con reconexion exponencial."""
@@ -161,6 +163,8 @@ class CollectorWithCandles:
             )
             await websocket.send(json.dumps(self._build_subscription_message(settings.COINBASE_CHANNEL, products)))
             await websocket.send(json.dumps(self._build_subscription_message(settings.COINBASE_HEARTBEATS_CHANNEL)))
+            if settings.LEVEL2_ENABLED:
+                await websocket.send(json.dumps(self._build_subscription_message(settings.COINBASE_LEVEL2_CHANNEL, products)))
 
             while not stop_event.is_set():
                 raw_message = await asyncio.wait_for(websocket.recv(), timeout=settings.WS_TIMEOUT_SECONDS)
@@ -170,6 +174,7 @@ class CollectorWithCandles:
     async def _handle_message(self, message: dict[str, Any], connection_key: str) -> None:
         await self._track_connection_health(message, connection_key)
         await self._track_connection_sequence(message, connection_key)
+        self._handle_level2_message(message)
         for trade in self._extract_trades(message):
             if not self._is_valid_trade(trade):
                 await self._publish_error("collector.invalid_payload", trade)
@@ -198,7 +203,59 @@ class CollectorWithCandles:
             await self._publish_stream(settings.STREAM_MARKET_TRADES_RAW, trade)
             candle = self.candle_builder.add_trade(product_id, price, size, ts_ms)
             if candle is not None:
+                if settings.ORDER_FLOW_ENABLED:
+                    of_metrics = self._order_flow_agg.close_window(
+                        product_id,
+                        candle.open_time,
+                        price_open=candle.open,
+                        price_close=candle.close,
+                    )
+                    if of_metrics is not None:
+                        await self._publish_stream(
+                            settings.STREAM_MARKET_ORDER_FLOW_1M,
+                            {k: str(v) for k, v in of_metrics.items()},
+                        )
                 await self._publish_closed_candle(candle.to_dict())
+            if settings.ORDER_FLOW_ENABLED:
+                self._order_flow_agg.add_trade(
+                    product_id,
+                    price,
+                    size,
+                    str(trade.get("side", "")),
+                    ts_ms,
+                )
+
+    def _handle_level2_message(self, message: dict[str, Any]) -> None:
+        """Despacha snapshots y updates del canal level2 al BookDepthTracker."""
+        if not settings.LEVEL2_ENABLED:
+            return
+        if str(message.get("channel", "")).lower() != settings.COINBASE_LEVEL2_CHANNEL:
+            return
+        for event in message.get("events", []):
+            event_type = str(event.get("type", "")).lower()
+            product_id = event.get("product_id") or message.get("product_id")
+            if not product_id:
+                continue
+            product_id = str(product_id)
+            updates = event.get("updates", [])
+            if event_type == "snapshot":
+                bids = [
+                    (str(u["price_level"]), str(u["new_quantity"]))
+                    for u in updates
+                    if str(u.get("side", "")).lower() == "bid"
+                ]
+                asks = [
+                    (str(u["price_level"]), str(u["new_quantity"]))
+                    for u in updates
+                    if str(u.get("side", "")).lower() == "offer"
+                ]
+                self._order_flow_agg.apply_book_snapshot(product_id, bids, asks)
+            elif event_type == "update":
+                changes = [
+                    (str(u.get("side", "")), str(u["price_level"]), str(u["new_quantity"]))
+                    for u in updates
+                ]
+                self._order_flow_agg.apply_book_update(product_id, changes)
 
     def _extract_trades(self, message: dict[str, Any]) -> list[dict[str, Any]]:
         trades: list[dict[str, Any]] = []

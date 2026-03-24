@@ -7,6 +7,13 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from features.order_flow import (
+    ORDER_FLOW_DERIVED_COLUMNS,
+    ORDER_FLOW_FEATURE_COLUMNS,  # noqa: F401 — re-exported for callers
+    ORDER_FLOW_RAW_COLUMNS,
+    OrderFlowFeatureCalculator,
+)
+
 
 FEATURE_COLUMNS: list[str] = [
     "ret_1",
@@ -65,7 +72,11 @@ class FeatureCalculator:
     macd_signal: int = 9
     trend_period: int = 20
 
-    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
+    def compute(
+        self,
+        df: pd.DataFrame,
+        df_order_flow: pd.DataFrame | None = None,
+    ) -> pd.DataFrame:
         """Agrega todas las features y elimina filas sin historia suficiente."""
         required = {"open_time", "open", "high", "low", "close", "volume"}
         missing = required.difference(df.columns)
@@ -179,13 +190,35 @@ class FeatureCalculator:
         result["day_of_week_sin"] = np.sin(dow_angle)
         result["day_of_week_cos"] = np.cos(dow_angle)
 
+        if df_order_flow is not None and not df_order_flow.empty:
+            # Merge raw columns first so OHLCV+raw are available together
+            # Excluir columnas ya presentes en result (e.g. trade_count de OHLCV)
+            raw_cols = [
+                c for c in ORDER_FLOW_RAW_COLUMNS
+                if c in df_order_flow.columns and c not in result.columns
+            ]
+            if raw_cols:
+                result = result.merge(
+                    df_order_flow[["open_time"] + raw_cols],
+                    on="open_time",
+                    how="left",
+                )
+                for col in raw_cols:
+                    result[col] = result[col].fillna(0.0)
+            # Compute all derived features over the merged OHLCV+raw df
+            of_calc = OrderFlowFeatureCalculator()
+            result = of_calc.compute_all(result)
+            for col in ORDER_FLOW_DERIVED_COLUMNS:
+                if col in result.columns:
+                    result[col] = result[col].fillna(0.0)
+
         result = result.dropna(subset=FEATURE_COLUMNS).reset_index(drop=True)
         return result
 
     @property
     def feature_columns(self) -> list[str]:
-        """Lista canonica de features calculadas."""
-        return FEATURE_COLUMNS.copy()
+        """Lista canonica de features: 36 OHLCV + 73 order flow = 109 total."""
+        return FEATURE_COLUMNS + ORDER_FLOW_FEATURE_COLUMNS
 
     @staticmethod
     def _pct_return(values: np.ndarray, lag: int) -> np.ndarray:

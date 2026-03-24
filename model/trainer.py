@@ -18,6 +18,7 @@ from sklearn.metrics import precision_score, roc_auc_score
 from config import settings
 from data.history_store import CandleHistoryStore
 from features.calculator import FeatureCalculator
+from features.order_flow import ORDER_FLOW_RAW_COLUMNS
 from features.selector import SelectorConfig
 from model.registry import ModelMetrics, ModelRecord, ModelRegistry, MultiAssetModelRegistry
 from model.signal_bundle import (
@@ -58,6 +59,7 @@ class Trainer:
         registry: ModelRegistry,
         redis_client: object | None = None,
         data_loader: Callable[[], pd.DataFrame] | None = None,
+        order_flow_loader: Callable[[], pd.DataFrame | None] | None = None,
         calculator: FeatureCalculator | None = None,
         target_builder: TargetBuilder | None = None,
         walk_forward_config: WalkForwardConfig | None = None,
@@ -68,6 +70,7 @@ class Trainer:
         self.registry = registry
         self.redis_client = redis_client
         self.data_loader = data_loader
+        self.order_flow_loader = order_flow_loader
         self.calculator = calculator or FeatureCalculator()
         self.target_builder = target_builder or TargetBuilder(
             TargetConfig(
@@ -103,7 +106,8 @@ class Trainer:
         if candles is None or len(candles) < max(200, self.walk_forward_config.min_train_size + 50):
             return RetrainCycleResult(status="insufficient_data", history_rows=0 if candles is None else len(candles))
 
-        features_df = self.calculator.compute(candles)
+        df_order_flow = self._load_order_flow()
+        features_df = self.calculator.compute(candles, df_order_flow=df_order_flow)
         labeled_df = self.target_builder.build(features_df)
         if len(labeled_df) < max(200, self.walk_forward_config.min_train_size + 50):
             return RetrainCycleResult(status="insufficient_data", history_rows=len(labeled_df))
@@ -210,6 +214,26 @@ class Trainer:
                     "trade_count": int(payload.get("trade_count")),
                 }
             )
+        if not records:
+            return None
+        return pd.DataFrame.from_records(records)
+
+    def _load_order_flow(self) -> pd.DataFrame | None:
+        if self.order_flow_loader is not None:
+            return self.order_flow_loader()
+        if self.redis_client is None:
+            return None
+        entries = self.redis_client.xrange(
+            "market.orderflow.1m", count=5000
+        )
+        records: list[dict[str, object]] = []
+        for _, payload in entries:
+            row: dict[str, object] = {
+                "open_time": int(payload.get("open_time", 0))
+            }
+            for col in ORDER_FLOW_RAW_COLUMNS:
+                row[col] = float(payload.get(col, 0.0))
+            records.append(row)
         if not records:
             return None
         return pd.DataFrame.from_records(records)
@@ -560,6 +584,7 @@ class MultiAssetTrainerService:
             trainer = Trainer(
                 registry=ModelRegistry(base_dir=self.registry_root / artifact.registry_key),
                 data_loader=lambda base_asset=artifact.base_asset: self._load_candles_for_base(base_asset),
+                order_flow_loader=lambda base_asset=artifact.base_asset: self._load_order_flow_for_base(base_asset),
                 walk_forward_config=self.walk_forward_config,
                 selector_config=self.selector_config,
                 retrain_interval=self.retrain_interval,
@@ -593,12 +618,33 @@ class MultiAssetTrainerService:
     def _load_candles_for_base(self, base_asset: str) -> pd.DataFrame | None:
         return self.history_store.load_candles_for_base(base_asset)
 
+    def _load_order_flow_for_base(
+        self, base_asset: str
+    ) -> pd.DataFrame | None:
+        df = self.history_store.get_candles_with_order_flow(base_asset)
+        if df.empty:
+            return None
+        of_cols = ["open_time"] + [
+            c for c in ORDER_FLOW_RAW_COLUMNS if c in df.columns
+        ]
+        return df[of_cols]
+
     def _sync_history(self) -> None:
-        """Persiste velas nuevas antes de disparar el reentrenamiento por activo."""
+        """Persiste velas y order flow nuevos antes del reentrenamiento."""
         if self.redis_client is None:
             return
-        synced_rows = self.history_store.sync_from_redis_stream(self.redis_client)
-        logger.info("Trainer sync history completado. inserted_rows={}", synced_rows)
+        synced_rows = self.history_store.sync_from_redis_stream(
+            self.redis_client
+        )
+        logger.info(
+            "Trainer sync candles completado. inserted_rows={}", synced_rows
+        )
+        synced_of = self.history_store.sync_order_flow_from_redis_stream(
+            self.redis_client
+        )
+        logger.info(
+            "Trainer sync order_flow completado. inserted_rows={}", synced_of
+        )
 
     def _iter_registry_artifacts(self):
         """Itera todos los assets: los que ya tienen registry + los observados nuevos."""

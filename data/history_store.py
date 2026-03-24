@@ -10,6 +10,7 @@ from typing import Any
 import pandas as pd
 
 from config import settings
+from features.order_flow import ORDER_FLOW_RAW_COLUMNS
 
 
 class CandleHistoryStore:
@@ -255,6 +256,32 @@ class CandleHistoryStore:
                 )
                 """
             )
+            of_col_defs = "\n".join(
+                f"                    {col} REAL,"
+                for col in ORDER_FLOW_RAW_COLUMNS
+            )
+            connection.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS candle_order_flow (
+                    product_id TEXT NOT NULL,
+                    open_time INTEGER NOT NULL,
+{of_col_defs}
+                    stream_id TEXT,
+                    PRIMARY KEY (product_id, open_time)
+                )
+                """
+            )
+            # Migrate existing tables: add any missing columns
+            cursor = connection.execute(
+                "PRAGMA table_info(candle_order_flow)"
+            )
+            existing_of_cols = {row[1] for row in cursor.fetchall()}
+            for col in ORDER_FLOW_RAW_COLUMNS:
+                if col not in existing_of_cols:
+                    connection.execute(
+                        f"ALTER TABLE candle_order_flow"
+                        f" ADD COLUMN {col} REAL"
+                    )
             connection.commit()
 
     def _upsert_candles_with_connection(
@@ -301,6 +328,107 @@ class CandleHistoryStore:
                 for candle in candles
             ],
         )
+
+    def upsert_order_flow(self, metrics_list: list[dict]) -> int:
+        """Inserta o actualiza metricas de order flow por (product_id, open_time)."""
+        if not metrics_list:
+            return 0
+        cols = ORDER_FLOW_RAW_COLUMNS
+        with sqlite3.connect(self.db_path) as connection:
+            connection.executemany(
+                f"""
+                INSERT INTO candle_order_flow
+                    (product_id, open_time, {", ".join(cols)})
+                VALUES
+                    (?, ?, {", ".join(["?"] * len(cols))})
+                ON CONFLICT(product_id, open_time) DO UPDATE SET
+                    {", ".join(f"{c}=excluded.{c}" for c in cols)}
+                """,
+                [
+                    (
+                        str(m.get("product_id", "")).strip().upper(),
+                        int(m.get("open_time", 0)),
+                        *(float(m.get(c, 0.0)) for c in cols),
+                    )
+                    for m in metrics_list
+                ],
+            )
+            connection.commit()
+        return len(metrics_list)
+
+    def sync_order_flow_from_redis_stream(
+        self,
+        redis_client: Any,
+        stream_name: str = "market.orderflow.1m",
+        batch_size: int = 1000,
+    ) -> int:
+        """Importa metricas de order flow desde Redis de forma incremental."""
+        last_stream_id = self.get_last_stream_id(stream_name)
+        imported = 0
+        range_start = "-" if last_stream_id is None else f"({last_stream_id}"
+
+        while True:
+            entries = redis_client.xrange(
+                stream_name, min=range_start, max="+", count=batch_size
+            )
+            if not entries:
+                break
+
+            metrics: list[dict] = []
+            latest_stream_id = last_stream_id
+            for message_id, payload in entries:
+                product_id = str(payload.get("product_id", "")).strip().upper()
+                if not product_id:
+                    continue
+                row: dict = {
+                    "product_id": product_id,
+                    "open_time": int(payload.get("open_time", 0)),
+                }
+                for col in ORDER_FLOW_RAW_COLUMNS:
+                    row[col] = float(payload.get(col, 0.0))
+                metrics.append(row)
+                latest_stream_id = message_id
+
+            if metrics:
+                imported += self.upsert_order_flow(metrics)
+            if latest_stream_id:
+                self.set_last_stream_id(stream_name, str(latest_stream_id))
+                range_start = f"({latest_stream_id}"
+            if len(entries) < batch_size:
+                break
+
+        return imported
+
+    def get_candles_with_order_flow(
+        self,
+        base_asset: str,
+        limit: int | None = None,
+    ) -> pd.DataFrame:
+        """Carga velas con metricas de order flow unidas por (product_id, open_time)."""
+        limit_clause = f"LIMIT {int(limit)}" if limit else ""
+        # Excluir trade_count de OF — ya existe en c.trade_count (evita col duplicada)
+        _OHLCV_COLS = {"product_id", "open_time", "close_time",
+                       "open", "high", "low", "close", "volume", "trade_count"}
+        of_raw = [c for c in ORDER_FLOW_RAW_COLUMNS if c not in _OHLCV_COLS]
+        of_cols = ", ".join(f"of.{c}" for c in of_raw)
+        query = f"""
+            SELECT
+                c.product_id, c.open_time, c.close_time,
+                c.open, c.high, c.low, c.close, c.volume, c.trade_count,
+                {of_cols}
+            FROM candles c
+            LEFT JOIN candle_order_flow of
+                ON c.product_id = of.product_id
+                AND c.open_time = of.open_time
+            WHERE c.base_asset = ?
+            ORDER BY c.open_time ASC
+            {limit_clause}
+        """
+        with sqlite3.connect(self.db_path) as connection:
+            frame = pd.read_sql_query(
+                query, connection, params=[base_asset.strip().upper()]
+            )
+        return frame
 
     def _record_bootstrap_load(
         self,

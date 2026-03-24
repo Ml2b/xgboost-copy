@@ -21,6 +21,7 @@ from data.collector import CollectorWithCandles
 from exchange.coinbase_client import CoinbaseAdvancedTradeClient
 from execution.order_manager import OrderManager
 from features.calculator import FeatureCalculator
+from features.order_flow import ORDER_FLOW_RAW_COLUMNS
 from model.inference import InferenceEngine
 from model.registry import MultiAssetModelRegistry
 from model.trainer import MultiAssetTrainerService
@@ -36,6 +37,9 @@ class FeatureEngine:
         self.buffers: dict[str, deque[dict[str, Any]]] = defaultdict(
             lambda: deque(maxlen=settings.FEATURE_BUFFER_SIZE)
         )
+        self.of_buffers: dict[str, deque[dict[str, Any]]] = defaultdict(
+            lambda: deque(maxlen=settings.FEATURE_BUFFER_SIZE)
+        )
         self.candles_consumed = 0
         self.features_published = 0
         self._last_runtime_log_at = 0.0
@@ -44,12 +48,16 @@ class FeatureEngine:
         stop_event = stop_event or asyncio.Event()
         logger.info("FeatureEngine iniciado. buffer_size={}", settings.FEATURE_BUFFER_SIZE)
         await self._ensure_group(settings.STREAM_MARKET_CANDLES_1M, "feature-engine")
+        streams: dict[str, str] = {settings.STREAM_MARKET_CANDLES_1M: ">"}
+        if settings.ORDER_FLOW_ENABLED:
+            await self._ensure_group(settings.STREAM_MARKET_ORDER_FLOW_1M, "feature-engine")
+            streams[settings.STREAM_MARKET_ORDER_FLOW_1M] = ">"
         while not stop_event.is_set():
             try:
                 messages = await self.redis_client.xreadgroup(
                     groupname="feature-engine",
                     consumername="feature-1",
-                    streams={settings.STREAM_MARKET_CANDLES_1M: ">"},
+                    streams=streams,
                     count=25,
                     block=1000,
                 )
@@ -57,12 +65,49 @@ class FeatureEngine:
                 if "NOGROUP" in str(exc):
                     logger.warning("FeatureEngine: NOGROUP detectado, recreando consumer group")
                     await self._ensure_group(settings.STREAM_MARKET_CANDLES_1M, "feature-engine")
+                    if settings.ORDER_FLOW_ENABLED:
+                        await self._ensure_group(
+                            settings.STREAM_MARKET_ORDER_FLOW_1M, "feature-engine"
+                        )
                     continue
                 raise
-            for _, stream_messages in messages:
-                for message_id, payload in stream_messages:
-                    await self._process_candle(payload)
-                    await self.redis_client.xack(settings.STREAM_MARKET_CANDLES_1M, "feature-engine", message_id)
+            # Primer paso: acumular order flow (sin I/O bloqueante)
+            for stream_name, stream_messages in messages:
+                if stream_name == settings.STREAM_MARKET_ORDER_FLOW_1M:
+                    for message_id, payload in stream_messages:
+                        self._buffer_order_flow(payload)
+                        await self.redis_client.xack(
+                            settings.STREAM_MARKET_ORDER_FLOW_1M,
+                            "feature-engine",
+                            message_id,
+                        )
+            # Segundo paso: procesar velas con order flow ya disponible
+            for stream_name, stream_messages in messages:
+                if stream_name == settings.STREAM_MARKET_CANDLES_1M:
+                    for message_id, payload in stream_messages:
+                        await self._process_candle(payload)
+                        await self.redis_client.xack(
+                            settings.STREAM_MARKET_CANDLES_1M,
+                            "feature-engine",
+                            message_id,
+                        )
+
+    def _buffer_order_flow(self, payload: dict[str, Any]) -> None:
+        """Acumula una fila de metricas raw de order flow en el buffer del producto."""
+        product_id = payload.get("product_id", "")
+        if not product_id:
+            return
+        try:
+            row: dict[str, Any] = {"open_time": int(float(payload["open_time"]))}
+            for col in ORDER_FLOW_RAW_COLUMNS:
+                if col in payload:
+                    try:
+                        row[col] = float(payload[col])
+                    except (ValueError, TypeError):
+                        row[col] = 0.0
+            self.of_buffers[product_id].append(row)
+        except Exception:
+            pass
 
     async def _process_candle(self, payload: dict[str, Any]) -> None:
         product_id = payload.get("product_id", "")
@@ -83,7 +128,10 @@ class FeatureEngine:
             return
 
         frame = pd.DataFrame(buffer)
-        features_frame = self.calculator.compute(frame)
+        df_order_flow: pd.DataFrame | None = None
+        if settings.ORDER_FLOW_ENABLED and self.of_buffers[product_id]:
+            df_order_flow = pd.DataFrame(list(self.of_buffers[product_id]))
+        features_frame = self.calculator.compute(frame, df_order_flow=df_order_flow)
         if features_frame.empty:
             return
         latest = features_frame.iloc[-1].to_dict()

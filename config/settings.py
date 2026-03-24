@@ -62,6 +62,15 @@ STREAM_PAPER_EXECUTION_EVENTS: Final[str] = "paper.execution.events"
 EXECUTION_STATE_KEY: Final[str] = "execution.managed_positions"
 STREAM_SYSTEM_HEALTH: Final[str] = "system.health"
 STREAM_SYSTEM_ERRORS: Final[str] = "system.errors"
+STREAM_MARKET_ORDER_FLOW_1M: Final[str] = "market.orderflow.1m"
+STREAM_MARKET_LEVEL2: Final[str] = "market.level2"
+ORDER_FLOW_ENABLED: Final[bool] = (
+    os.getenv("ORDER_FLOW_ENABLED", "true").lower() == "true"
+)
+LEVEL2_ENABLED: Final[bool] = (
+    os.getenv("LEVEL2_ENABLED", "true").lower() == "true"
+)
+COINBASE_LEVEL2_CHANNEL: Final[str] = "level2"
 
 # Mercado y velas
 CORE_BASES: Final[list[str]] = [
