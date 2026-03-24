@@ -1,25 +1,25 @@
 services:
   - type: web
-    name: xgboost-trader
+    name: xgboost-copy
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: python scripts/render_start.py
     plan: standard
     healthCheckPath: /health
     disk:
-      name: runtime-storage
+      name: xgboost-copy-storage
       mountPath: /opt/render/project/src/runtime
       sizeGB: 5
     envVars:
       - key: REDIS_URL
         fromService:
-          name: xgboost-redis
+          name: xgboost-copy-redis
           type: keyvalue
           property: connectionString
       - key: COINBASE_CREDENTIALS_PATH
         value: /etc/secrets/coinbase_api_key.json
       - key: MODEL_REGISTRY_ROOT
-        value: /opt/render/project/src/runtime/models/multi_asset_paper_24
+        value: /opt/render/project/src/runtime/models/multi_asset_v2
       - key: TRAINER_HISTORY_DB_PATH
         value: /opt/render/project/src/runtime/trainer_candle_history.sqlite3
       - key: PYTHONUNBUFFERED
@@ -64,7 +64,7 @@ services:
         value: "15"
 
   - type: keyvalue
-    name: xgboost-redis
+    name: xgboost-copy-redis
     plan: starter
     maxmemoryPolicy: allkeys-lru
     ipAllowList: []
