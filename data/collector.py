@@ -164,7 +164,7 @@ class CollectorWithCandles:
             await websocket.send(json.dumps(self._build_subscription_message(settings.COINBASE_CHANNEL, products)))
             await websocket.send(json.dumps(self._build_subscription_message(settings.COINBASE_HEARTBEATS_CHANNEL)))
             if settings.LEVEL2_ENABLED:
-                await websocket.send(json.dumps(self._build_subscription_message(settings.COINBASE_LEVEL2_CHANNEL, products)))
+                await websocket.send(json.dumps(self._build_subscription_message(settings.COINBASE_LEVEL2_SUBSCRIBE_CHANNEL, products)))
 
             while not stop_event.is_set():
                 raw_message = await asyncio.wait_for(websocket.recv(), timeout=settings.WS_TIMEOUT_SECONDS)

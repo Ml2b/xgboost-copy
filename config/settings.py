@@ -70,7 +70,8 @@ ORDER_FLOW_ENABLED: Final[bool] = (
 LEVEL2_ENABLED: Final[bool] = (
     os.getenv("LEVEL2_ENABLED", "true").lower() == "true"
 )
-COINBASE_LEVEL2_CHANNEL: Final[str] = "level2"
+COINBASE_LEVEL2_SUBSCRIBE_CHANNEL: Final[str] = "level2"
+COINBASE_LEVEL2_CHANNEL: Final[str] = "l2_data"
 
 # Mercado y velas
 CORE_BASES: Final[list[str]] = [
