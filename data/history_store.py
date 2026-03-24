@@ -355,7 +355,10 @@ class CandleHistoryStore:
                     (
                         str(m.get("product_id", "")).strip().upper(),
                         int(m.get("open_time", 0)),
-                        *(float(m.get(c, 0.0)) for c in cols),
+                        *(
+                            None if (v := m.get(c)) is None else float(v)
+                            for c in cols
+                        ),
                     )
                     for m in metrics_list
                 ],
