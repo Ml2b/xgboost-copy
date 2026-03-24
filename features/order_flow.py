@@ -582,8 +582,8 @@ class OrderFlowFeatureCalculator:
 
     def _compute_trade_derived(self, df: pd.DataFrame) -> pd.DataFrame:
         delta = pd.Series(df["volume_delta"].astype(float))
-        df["cvd_5"] = delta.rolling(self.cvd_window_short, min_periods=1).sum()
-        df["cvd_15"] = delta.rolling(self.cvd_window_long, min_periods=1).sum()
+        df["cvd_5"] = delta.rolling(self.cvd_window_short, min_periods=self.cvd_window_short).sum()
+        df["cvd_15"] = delta.rolling(self.cvd_window_long, min_periods=self.cvd_window_long).sum()
 
         dr = pd.Series(df["delta_ratio"].astype(float))
         df["delta_acceleration"] = (
@@ -754,14 +754,11 @@ class OrderFlowFeatureCalculator:
         else:
             df["volatility_regime"] = 1.0
 
-        # spread_regime: 0 normal / 1 ampliado
+        # spread_regime: 0 normal / 1 ampliado (expanding para evitar look-ahead)
         if "relative_spread" in df.columns:
-            rs = df["relative_spread"].to_numpy(dtype=float)
-            rs_valid = rs[rs > 0]
-            if len(rs_valid) > 10:
-                threshold = float(np.percentile(rs_valid, 75))
-            else:
-                threshold = 0.001
+            rs = pd.Series(df["relative_spread"].to_numpy(dtype=float))
+            threshold = rs.expanding(min_periods=10).quantile(0.75)
+            threshold = threshold.fillna(0.001)
             df["spread_regime"] = (rs > threshold).astype(float)
         else:
             df["spread_regime"] = 0.0

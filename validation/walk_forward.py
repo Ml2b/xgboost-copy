@@ -313,5 +313,5 @@ def build_purged_train_validation_bounds(n_rows: int, gap_periods: int) -> tuple
     train_end = max(1, raw_split - max(0, gap_periods))
     val_start = min(n_rows - 1, raw_split)
     if val_start <= train_end:
-        val_start = min(n_rows - 1, train_end)
+        val_start = min(n_rows - 1, train_end + 1)
     return train_end, val_start

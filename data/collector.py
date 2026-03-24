@@ -66,7 +66,7 @@ class CollectorWithCandles:
         self.reconcile_lookback_minutes = max(1, int(reconcile_lookback_minutes))
         self.reconcile_cooldown_seconds = max(1, int(reconcile_cooldown_seconds))
         self.stats = CollectorStats()
-        self._seen_hashes: deque[str] = deque(maxlen=500)
+        self._seen_hashes: deque[str] = deque(maxlen=50_000)
         self._seen_lookup: set[str] = set()
         self._last_sequence_by_connection: dict[str, int] = {}
         self._last_heartbeat_counter_by_connection: dict[str, int] = {}
@@ -201,6 +201,16 @@ class CollectorWithCandles:
                 self.stats.lag_ema_ms = 0.001 * lag_ms + 0.999 * self.stats.lag_ema_ms
 
             await self._publish_stream(settings.STREAM_MARKET_TRADES_RAW, trade)
+            # Agregar trade al aggregator ANTES de cerrar la vela para que
+            # el último trade se incluya en las métricas de order flow.
+            if settings.ORDER_FLOW_ENABLED:
+                self._order_flow_agg.add_trade(
+                    product_id,
+                    price,
+                    size,
+                    str(trade.get("side", "")),
+                    ts_ms,
+                )
             candle = self.candle_builder.add_trade(product_id, price, size, ts_ms)
             if candle is not None:
                 if settings.ORDER_FLOW_ENABLED:
@@ -216,14 +226,6 @@ class CollectorWithCandles:
                             {k: str(v) for k, v in of_metrics.items()},
                         )
                 await self._publish_closed_candle(candle.to_dict())
-            if settings.ORDER_FLOW_ENABLED:
-                self._order_flow_agg.add_trade(
-                    product_id,
-                    price,
-                    size,
-                    str(trade.get("side", "")),
-                    ts_ms,
-                )
 
     def _handle_level2_message(self, message: dict[str, Any]) -> None:
         """Despacha snapshots y updates del canal level2 al BookDepthTracker."""
@@ -504,7 +506,8 @@ class CollectorWithCandles:
                 continue
             self._last_reconcile_started_at_by_product[product_id] = started_at
             try:
-                candles = self.coinbase_client.get_candles(
+                candles = await asyncio.to_thread(
+                    self.coinbase_client.get_candles,
                     product_id=product_id,
                     start=start_seconds,
                     end=end_seconds,

@@ -203,13 +203,37 @@ class FeatureCalculator:
                     on="open_time",
                     how="left",
                 )
+                # Sentinel values semánticamente correctos por columna:
+                # - Volúmenes/conteos/deltas → 0.0 (sin actividad)
+                # - buy_sell_ratio → 1.0 (equilibrio neutro)
+                # - microprice → close (mejor proxy sin L2)
+                # - spread/relative_spread → NaN (XGBoost trata como missing)
+                _NEUTRAL_SENTINELS = {
+                    "buy_sell_ratio": 1.0,
+                    "delta_ratio": 0.0,
+                    "microprice": None,       # rellenado abajo con close
+                    "microprice_shift": 0.0,
+                    "spread": float("nan"),
+                    "relative_spread": float("nan"),
+                }
                 for col in raw_cols:
-                    result[col] = result[col].fillna(0.0)
+                    sentinel = _NEUTRAL_SENTINELS.get(col, 0.0)
+                    if col == "microprice":
+                        result[col] = result[col].fillna(result["close"])
+                    elif sentinel != sentinel:  # NaN check
+                        pass  # dejar NaN — XGBoost lo maneja nativamente
+                    else:
+                        result[col] = result[col].fillna(sentinel)
             # Compute all derived features over the merged OHLCV+raw df
             of_calc = OrderFlowFeatureCalculator()
             result = of_calc.compute_all(result)
             for col in ORDER_FLOW_DERIVED_COLUMNS:
                 if col in result.columns:
+                    # Regímenes y métricas de spread: dejar NaN para XGBoost
+                    if col in ("spread_regime", "liquidity_regime",
+                               "current_spread_cost", "fee_impact",
+                               "execution_quality_estimate"):
+                        continue
                     result[col] = result[col].fillna(0.0)
 
         result = result.dropna(subset=FEATURE_COLUMNS).reset_index(drop=True)

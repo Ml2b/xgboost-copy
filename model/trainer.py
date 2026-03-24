@@ -158,6 +158,12 @@ class Trainer:
                 reason=str(exc),
             )
         stable_features = wf_result.stable_features
+        if not stable_features:
+            return RetrainCycleResult(
+                status="no_stable_features",
+                history_rows=len(labeled_df),
+                reason="walk-forward eliminó todas las features",
+            )
         df_wf = labeled_df.iloc[: wf_result.test_start_idx].reset_index(drop=True)
         df_test = labeled_df.iloc[wf_result.test_start_idx :].reset_index(drop=True)
         sample_weight_wf = sample_weight[: wf_result.test_start_idx] if sample_weight is not None else None
@@ -563,7 +569,10 @@ class MultiAssetTrainerService:
     async def _sync_loop(self, stop_event: asyncio.Event) -> None:
         """Sincroniza velas y order flow de Redis → SQLite cada TRAINER_HISTORY_SYNC_INTERVAL segundos."""
         while not stop_event.is_set():
-            await asyncio.to_thread(self._sync_history)
+            try:
+                await asyncio.to_thread(self._sync_history)
+            except Exception as exc:
+                logger.warning("Trainer sync_loop error (continua): {}", exc)
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=settings.TRAINER_HISTORY_SYNC_INTERVAL)
             except asyncio.TimeoutError:
@@ -572,8 +581,11 @@ class MultiAssetTrainerService:
     async def _retrain_loop(self, stop_event: asyncio.Event) -> None:
         """Reentrena todos los activos cada retrain_interval segundos."""
         while not stop_event.is_set():
-            await asyncio.to_thread(self._retrain_all_assets)
-            self.multi_registry.refresh()
+            try:
+                await asyncio.to_thread(self._retrain_all_assets)
+                self.multi_registry.refresh()
+            except Exception as exc:
+                logger.warning("Trainer retrain_loop error (continua): {}", exc)
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=self.retrain_interval)
             except asyncio.TimeoutError:

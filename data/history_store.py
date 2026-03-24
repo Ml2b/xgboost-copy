@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ class CandleHistoryStore:
     def __init__(self, db_path: str | Path = settings.TRAINER_HISTORY_DB_PATH) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
         self._initialize_schema()
 
     def sync_from_redis_stream(
@@ -73,7 +75,8 @@ class CandleHistoryStore:
         if not candles:
             return 0
 
-        with sqlite3.connect(self.db_path) as connection:
+        with self._lock, sqlite3.connect(self.db_path) as connection:
+            connection.execute("PRAGMA journal_mode=WAL")
             self._upsert_candles_with_connection(connection, candles)
             connection.commit()
         return len(candles)
@@ -123,7 +126,8 @@ class CandleHistoryStore:
         ).fillna(0).astype(int)
 
         inserted = 0
-        with sqlite3.connect(self.db_path) as connection:
+        with self._lock, sqlite3.connect(self.db_path) as connection:
+            connection.execute("PRAGMA journal_mode=WAL")
             for start in range(0, len(normalized), chunk_size):
                 chunk = normalized.iloc[start : start + chunk_size]
                 chunk_records = [
@@ -213,6 +217,8 @@ class CandleHistoryStore:
 
     def _initialize_schema(self) -> None:
         with sqlite3.connect(self.db_path) as connection:
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("PRAGMA busy_timeout=5000")
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS candles (
@@ -334,7 +340,8 @@ class CandleHistoryStore:
         if not metrics_list:
             return 0
         cols = ORDER_FLOW_RAW_COLUMNS
-        with sqlite3.connect(self.db_path) as connection:
+        with self._lock, sqlite3.connect(self.db_path) as connection:
+            connection.execute("PRAGMA journal_mode=WAL")
             connection.executemany(
                 f"""
                 INSERT INTO candle_order_flow
@@ -385,7 +392,8 @@ class CandleHistoryStore:
                     "open_time": int(payload.get("open_time", 0)),
                 }
                 for col in ORDER_FLOW_RAW_COLUMNS:
-                    row[col] = float(payload.get(col, 0.0))
+                    raw_val = payload.get(col)
+                    row[col] = float(raw_val) if raw_val is not None else None
                 metrics.append(row)
                 latest_stream_id = message_id
 
