@@ -232,6 +232,7 @@ class DiagnosticsServer:
         paper_rows = await self._xrange(settings.STREAM_PAPER_EXECUTION_EVENTS, min_id)
         candle_stats = await asyncio.to_thread(self._analyse_candles_redis, min_id)
         history_stats = await asyncio.to_thread(self._analyse_history_store)
+        of_stats = await asyncio.to_thread(self._analyse_order_flow_store)
         retrain_stats = await asyncio.to_thread(self._analyse_retrains, since_24h)
 
         return json.dumps({
@@ -243,6 +244,7 @@ class DiagnosticsServer:
             "paper": self._analyse_paper(paper_rows),
             "candles_stream": candle_stats,
             "history_store": history_stats,
+            "order_flow_store": of_stats,
             "retrains_24h": retrain_stats,
         }, indent=2)
 
@@ -325,6 +327,67 @@ class DiagnosticsServer:
                     for r in rows
                 }
             return {"total_rows": total, "assets": by_asset}
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    @staticmethod
+    def _analyse_order_flow_store() -> dict:
+        """Reporta filas de order flow en SQLite y cobertura de columnas L2."""
+        import sqlite3
+        from features.order_flow import (
+            ORDER_FLOW_TRADE_COLUMNS,
+            ORDER_FLOW_SPREAD_COLUMNS,
+            ORDER_FLOW_BOOK_DEPTH_COLUMNS,
+            ORDER_FLOW_BOOK_DYNAMICS_COLUMNS,
+        )
+        db_path = Path(settings.TRAINER_HISTORY_DB_PATH)
+        if not db_path.exists():
+            return {"error": f"db not found: {db_path}"}
+        try:
+            with sqlite3.connect(db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                # Total filas por asset
+                rows = conn.execute(
+                    "SELECT product_id, COUNT(*) as n, MAX(open_time) as latest_ms "
+                    "FROM candle_order_flow GROUP BY product_id ORDER BY n DESC"
+                ).fetchall()
+                if not rows:
+                    return {"total_rows": 0, "assets": {}, "l2_coverage": {}}
+                total = sum(r["n"] for r in rows)
+                now_ms = int(time.time() * 1000)
+                by_asset = {
+                    r["product_id"]: {
+                        "rows": r["n"],
+                        "latest_ago_min": round((now_ms - r["latest_ms"]) / 60000, 1) if r["latest_ms"] else None,
+                    }
+                    for r in rows
+                }
+                # Verificar columnas existentes en la tabla
+                cols_info = conn.execute("PRAGMA table_info(candle_order_flow)").fetchall()
+                existing_cols = {c["name"] for c in cols_info}
+                # Cobertura L2: cuántas filas tienen datos no-nulos por grupo
+                l2_groups = {
+                    "trade": [c for c in ORDER_FLOW_TRADE_COLUMNS if c in existing_cols],
+                    "spread": [c for c in ORDER_FLOW_SPREAD_COLUMNS if c in existing_cols],
+                    "book_depth": [c for c in ORDER_FLOW_BOOK_DEPTH_COLUMNS if c in existing_cols],
+                    "book_dynamics": [c for c in ORDER_FLOW_BOOK_DYNAMICS_COLUMNS if c in existing_cols],
+                }
+                coverage: dict[str, Any] = {}
+                for group_name, cols in l2_groups.items():
+                    if not cols:
+                        coverage[group_name] = {"columns": 0, "sample_col": None, "non_null_rows": 0}
+                        continue
+                    sample_col = cols[0]
+                    non_null = conn.execute(
+                        f"SELECT COUNT(*) FROM candle_order_flow WHERE {sample_col} IS NOT NULL AND {sample_col} != 0"
+                    ).fetchone()[0]
+                    coverage[group_name] = {
+                        "columns": len(cols),
+                        "sample_col": sample_col,
+                        "non_null_rows": non_null,
+                        "pct_of_total": round(non_null / total * 100, 1) if total > 0 else 0,
+                    }
+                return {"total_rows": total, "assets": by_asset, "l2_coverage": coverage}
         except Exception as exc:
             return {"error": str(exc)}
 
