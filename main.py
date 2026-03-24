@@ -234,11 +234,13 @@ class DiagnosticsServer:
         history_stats = await asyncio.to_thread(self._analyse_history_store)
         of_stats = await asyncio.to_thread(self._analyse_order_flow_store)
         retrain_stats = await asyncio.to_thread(self._analyse_retrains, since_24h)
+        collector_health = await self._get_collector_health()
 
         return json.dumps({
             "generated_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "window_hours": self._HOURS_BACK,
             "process": self._process_info(),
+            "collector": collector_health,
             "signals": self._analyse_signals(sig_rows),
             "execution": self._analyse_execution(exe_rows),
             "paper": self._analyse_paper(paper_rows),
@@ -247,6 +249,27 @@ class DiagnosticsServer:
             "order_flow_store": of_stats,
             "retrains_24h": retrain_stats,
         }, indent=2)
+
+    async def _get_collector_health(self) -> dict:
+        """Lee el ultimo health del collector desde Redis y el largo del stream de order flow."""
+        try:
+            entries = await self.redis_client.xrevrange(
+                settings.STREAM_SYSTEM_HEALTH, count=20,
+            )
+            health: dict = {}
+            for _, payload in entries:
+                svc = str(payload.get("service", ""))
+                if svc == "collector":
+                    health = {k: v for k, v in payload.items()}
+                    break
+            try:
+                of_len = await self.redis_client.xlen(settings.STREAM_MARKET_ORDER_FLOW_1M)
+                health["redis_of_stream_len"] = of_len
+            except Exception:
+                pass
+            return health
+        except Exception:
+            return {}
 
     @staticmethod
     def _process_info() -> dict:

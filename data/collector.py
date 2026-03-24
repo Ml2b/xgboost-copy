@@ -32,6 +32,11 @@ class CollectorStats:
     lag_ms_total: float = 0.0
     lag_samples: int = 0
     lag_ema_ms: float = 0.0
+    of_published: int = 0
+    of_none: int = 0
+    of_errors: int = 0
+    l2_messages: int = 0
+    l2_errors: int = 0
 
     @property
     def avg_lag_ms(self) -> float:
@@ -183,7 +188,13 @@ class CollectorWithCandles:
     async def _handle_message(self, message: dict[str, Any], connection_key: str) -> None:
         await self._track_connection_health(message, connection_key)
         await self._track_connection_sequence(message, connection_key)
-        self._handle_level2_message(message)
+        try:
+            self._handle_level2_message(message)
+            if str(message.get("channel", "")).lower() == settings.COINBASE_LEVEL2_CHANNEL:
+                self.stats.l2_messages += 1
+        except Exception as exc:
+            self.stats.l2_errors += 1
+            logger.warning("Collector L2 processing error ignorado: {}", exc)
         for trade in self._extract_trades(message):
             if not self._is_valid_trade(trade):
                 await self._publish_error("collector.invalid_payload", trade)
@@ -223,16 +234,27 @@ class CollectorWithCandles:
             candle = self.candle_builder.add_trade(product_id, price, size, ts_ms)
             if candle is not None:
                 if settings.ORDER_FLOW_ENABLED:
-                    of_metrics = self._order_flow_agg.close_window(
-                        product_id,
-                        candle.open_time,
-                        price_open=candle.open,
-                        price_close=candle.close,
-                    )
-                    if of_metrics is not None:
-                        await self._publish_stream(
-                            settings.STREAM_MARKET_ORDER_FLOW_1M,
-                            {k: str(v) for k, v in of_metrics.items()},
+                    try:
+                        of_metrics = self._order_flow_agg.close_window(
+                            product_id,
+                            candle.open_time,
+                            price_open=candle.open,
+                            price_close=candle.close,
+                        )
+                        if of_metrics is not None:
+                            await self._publish_stream(
+                                settings.STREAM_MARKET_ORDER_FLOW_1M,
+                                {k: str(v) for k, v in of_metrics.items()},
+                            )
+                            self.stats.of_published += 1
+                        else:
+                            self.stats.of_none += 1
+                    except Exception as exc:
+                        self.stats.of_errors += 1
+                        logger.warning(
+                            "Collector order_flow close_window error: product={} error={}",
+                            product_id,
+                            exc,
                         )
                 await self._publish_closed_candle(candle.to_dict())
 
@@ -251,20 +273,26 @@ class CollectorWithCandles:
             updates = event.get("updates", [])
             if event_type == "snapshot":
                 bids = [
-                    (str(u["price_level"]), str(u["new_quantity"]))
+                    (str(u.get("price_level", "0")), str(u.get("new_quantity", "0")))
                     for u in updates
                     if str(u.get("side", "")).lower() == "bid"
+                    and u.get("price_level") is not None
+                    and u.get("new_quantity") is not None
                 ]
                 asks = [
-                    (str(u["price_level"]), str(u["new_quantity"]))
+                    (str(u.get("price_level", "0")), str(u.get("new_quantity", "0")))
                     for u in updates
                     if str(u.get("side", "")).lower() == "offer"
+                    and u.get("price_level") is not None
+                    and u.get("new_quantity") is not None
                 ]
                 self._order_flow_agg.apply_book_snapshot(product_id, bids, asks)
             elif event_type == "update":
                 changes = [
-                    (str(u.get("side", "")), str(u["price_level"]), str(u["new_quantity"]))
+                    (str(u.get("side", "")), str(u.get("price_level", "0")), str(u.get("new_quantity", "0")))
                     for u in updates
+                    if u.get("price_level") is not None
+                    and u.get("new_quantity") is not None
                 ]
                 self._order_flow_agg.apply_book_update(product_id, changes)
 
@@ -433,6 +461,11 @@ class CollectorWithCandles:
                     "duplicates": self.stats.duplicates,
                     "gaps": self.stats.gaps,
                     "avg_lag_ms": round(self.stats.avg_lag_ms, 3),
+                    "of_published": self.stats.of_published,
+                    "of_none": self.stats.of_none,
+                    "of_errors": self.stats.of_errors,
+                    "l2_messages": self.stats.l2_messages,
+                    "l2_errors": self.stats.l2_errors,
                 },
             )
             self._log_runtime_summary()

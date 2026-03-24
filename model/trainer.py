@@ -568,15 +568,21 @@ class MultiAssetTrainerService:
 
     async def _sync_loop(self, stop_event: asyncio.Event) -> None:
         """Sincroniza velas y order flow de Redis → SQLite cada TRAINER_HISTORY_SYNC_INTERVAL segundos."""
+        # Sync inmediato al arrancar para no perder datos acumulados en Redis
+        try:
+            await asyncio.to_thread(self._sync_history)
+            logger.info("Sync inicial completado al arrancar _sync_loop")
+        except Exception as exc:
+            logger.warning("Sync inicial fallido (continua): {}", exc)
         while not stop_event.is_set():
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=settings.TRAINER_HISTORY_SYNC_INTERVAL)
+            except asyncio.TimeoutError:
+                pass
             try:
                 await asyncio.to_thread(self._sync_history)
             except Exception as exc:
                 logger.warning("Trainer sync_loop error (continua): {}", exc)
-            try:
-                await asyncio.wait_for(stop_event.wait(), timeout=settings.TRAINER_HISTORY_SYNC_INTERVAL)
-            except asyncio.TimeoutError:
-                continue
 
     async def _retrain_loop(self, stop_event: asyncio.Event) -> None:
         """Reentrena todos los activos cada retrain_interval segundos."""
