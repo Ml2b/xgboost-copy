@@ -224,6 +224,8 @@ class FeatureCalculator:
                     "cancel_asymmetry": float("nan"),
                 }
                 for col in raw_cols:
+                    # Forzar float64: SQLite NULL llega como None → dtype object
+                    result[col] = pd.to_numeric(result[col], errors="coerce")
                     sentinel = _NEUTRAL_SENTINELS.get(col, 0.0)
                     if col == "microprice":
                         result[col] = result[col].fillna(result["close"])
