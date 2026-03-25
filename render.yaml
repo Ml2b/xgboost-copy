@@ -42,6 +42,8 @@ services:
         value: "true"
       - key: EXECUTION_DRY_RUN
         value: "true"
+      - key: EXECUTION_COOLDOWN_SECONDS
+        value: "90"
       - key: PAPER_TRADING_ENABLED
         value: "true"
       - key: PRODUCTS_CSV
@@ -60,6 +62,28 @@ services:
         value: "0.05"
       - key: PILOT_ORDER_NOTIONAL_USD
         value: "50"
+      - key: CHOP_GUARD_ENABLED
+        value: "true"
+      - key: CHOP_GUARD_WINDOW_MINUTES
+        value: "75"
+      - key: CHOP_GUARD_FAST_EXIT_MINUTES
+        value: "15"
+      - key: CHOP_GUARD_ADVERSE_PNL_PCT
+        value: "-0.15"
+      - key: CHOP_GUARD_CAUTION_EXIT_COUNT
+        value: "2"
+      - key: CHOP_GUARD_LOCK_EXIT_COUNT
+        value: "3"
+      - key: CHOP_GUARD_LOCK_STOP_COUNT
+        value: "2"
+      - key: CHOP_GUARD_PROBABILITY_BUFFER
+        value: "0.04"
+      - key: CHOP_GUARD_RISK_SCALE
+        value: "0.35"
+      - key: CHOP_GUARD_NOTIONAL_SCALE
+        value: "0.60"
+      - key: CHOP_GUARD_BLOCK_MINUTES
+        value: "60"
       - key: SELECTIVE_PROMOTION_MIN_AUC
         value: "0.48"
       - key: SELECTIVE_PROMOTION_MIN_PRECISION

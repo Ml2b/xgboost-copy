@@ -14,7 +14,7 @@ from loguru import logger
 from config import settings
 from exchange.coinbase_client import CoinbaseAdvancedTradeClient
 from execution.position_exit import PositionExitPolicy
-from execution.position_sizer import KellyFractionalSizer, PositionSizingDecision
+from execution.position_sizer import KellyFractionalSizer, PositionSizingDecision, scale_position_sizing_decision
 from risk.guardian import Portfolio, RiskGuardian
 
 
@@ -258,6 +258,8 @@ class OrderManager:
                     signal_label="EXIT_LONG",
                     exit_reason=auto_exit.reason,
                     managed_position=managed_position,
+                    exit_reference_price=current_exit_price,
+                    exit_timestamp_ms=current_timestamp_ms,
                 )
 
         if signal == "HOLD":
@@ -275,12 +277,21 @@ class OrderManager:
             )
 
         if signal == "BUY":
+            raw_buy_threshold = float(payload.get("buy_threshold", settings.MIN_SIGNAL_PROB))
+            chop_adjustment = self.guardian.entry_adjustment(product_id, timestamp_ms=current_timestamp_ms)
             sizing_decision = self.position_sizer.size(
                 prob_buy=prob_buy,
-                buy_threshold=float(payload.get("buy_threshold", settings.MIN_SIGNAL_PROB)),
+                buy_threshold=max(raw_buy_threshold, chop_adjustment.min_signal_prob),
                 capital_total=portfolio.capital_total,
                 capital_available=portfolio.capital_disponible,
             )
+            if chop_adjustment.cautious and chop_adjustment.notional_scale < 1.0:
+                sizing_decision = scale_position_sizing_decision(
+                    sizing_decision,
+                    scale=chop_adjustment.notional_scale,
+                    capital_total=portfolio.capital_total,
+                    reason_tag="chop_caution",
+                )
             risk_payload = {
                 "signal": signal,
                 "risk_pct": sizing_decision.risk_pct,
@@ -336,6 +347,8 @@ class OrderManager:
             signal_label=signal,
             exit_reason=str(payload.get("reason", "signal_exit_long")),
             managed_position=managed_position,
+            exit_reference_price=current_exit_price,
+            exit_timestamp_ms=current_timestamp_ms,
         )
 
     async def _handle_buy(
@@ -519,6 +532,8 @@ class OrderManager:
         signal_label: str,
         exit_reason: str,
         managed_position: ManagedPosition | None,
+        exit_reference_price: float = 0.0,
+        exit_timestamp_ms: int | None = None,
     ) -> dict[str, Any]:
         available_base = balances.get(base_asset.upper(), Decimal("0"))
         managed_quantity = Decimal(str(managed_position.quantity)) if managed_position is not None else Decimal("0")
@@ -540,11 +555,25 @@ class OrderManager:
                 latency_ms=self._elapsed_ms(latency_started),
             )
 
+        exit_timestamp_ms = int(exit_timestamp_ms or int(time.time() * 1000))
+        exit_pnl_pct = 0.0
+        holding_minutes = 0.0
+        if managed_position is not None and managed_position.entry_price > 0 and exit_reference_price > 0:
+            exit_pnl_pct = ((exit_reference_price / managed_position.entry_price) - 1.0) * 100.0
+            holding_minutes = max(0.0, (exit_timestamp_ms - managed_position.opened_at_ms) / 60_000.0)
+
         if self.dry_run or not self.execution_enabled:
             self.stats.dry_runs += 1
             self._mark_cooldown(product_id)
             self._managed_positions.pop(product_id, None)
             await self._persist_managed_positions()
+            self.guardian.register_exit(
+                product_id,
+                reason=exit_reason,
+                pnl_pct=exit_pnl_pct,
+                timestamp_ms=exit_timestamp_ms,
+                holding_minutes=holding_minutes,
+            )
             logger.info(
                 "OrderManager dry-run EXIT aceptado. product_id={} base_size={} model_id={} reason={}",
                 product_id,
@@ -571,6 +600,13 @@ class OrderManager:
             self.stats.live_orders += 1
             self._managed_positions.pop(product_id, None)
             await self._persist_managed_positions()
+            self.guardian.register_exit(
+                product_id,
+                reason=exit_reason,
+                pnl_pct=exit_pnl_pct,
+                timestamp_ms=exit_timestamp_ms,
+                holding_minutes=holding_minutes,
+            )
             logger.info(
                 "OrderManager envio EXIT live. product_id={} base_size={} model_id={} reason={}",
                 product_id,

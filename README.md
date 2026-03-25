@@ -232,6 +232,7 @@ El repo esta pensado para subir solo codigo y artefactos minimos de arranque:
 - `seed_models/multi_asset_paper_24` queda versionado como seed para Render;
 - el historico pesado, sesiones, SQLite local, logs y reportes quedan fuera via `.gitignore`;
 - `render.yaml` arranca un worker en modo `dry-run + paper trading`, con Redis gestionado y storage persistente en `runtime/`.
+- el deploy actual tambien incluye un `chop guard` para detectar activos en serrucho, subir el umbral de entrada, bajar el notional y enfriar temporalmente el activo tras stop-outs repetidos.
 
 Importante:
 

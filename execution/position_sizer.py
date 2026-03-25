@@ -124,3 +124,34 @@ class KellyFractionalSizer:
         if capital_total <= 0 or notional_usd <= 0:
             return 0.0
         return float((notional_usd * stop_distance) / capital_total)
+
+
+def scale_position_sizing_decision(
+    decision: PositionSizingDecision,
+    *,
+    scale: float,
+    capital_total: float,
+    stop_loss_pct: float = settings.POSITION_STOP_LOSS_PCT,
+    reason_tag: str = "scaled",
+) -> PositionSizingDecision:
+    """Escala un sizing ya calculado para reaccionar a un contexto mas hostil."""
+    bounded_scale = max(0.0, min(1.0, float(scale)))
+    if bounded_scale >= 0.999999:
+        return decision
+
+    scaled_notional = round(float(decision.notional_usd) * bounded_scale, 6)
+    stop_distance = max(0.0, float(stop_loss_pct)) / 100.0
+    scaled_risk_pct = 0.0
+    if capital_total > 0 and scaled_notional > 0 and stop_distance > 0:
+        scaled_risk_pct = (scaled_notional * stop_distance) / float(capital_total)
+
+    return PositionSizingDecision(
+        notional_usd=scaled_notional,
+        risk_pct=round(scaled_risk_pct, 8),
+        raw_kelly_fraction=decision.raw_kelly_fraction,
+        applied_kelly_fraction=decision.applied_kelly_fraction,
+        confidence_scale=decision.confidence_scale,
+        reward_risk_ratio=decision.reward_risk_ratio,
+        used_dynamic=decision.used_dynamic,
+        reason=f"{decision.reason}|{reason_tag}_{bounded_scale:.2f}",
+    )

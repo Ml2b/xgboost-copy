@@ -343,6 +343,17 @@ PAPER_TRADING_ENABLED: Final[bool] = os.getenv("PAPER_TRADING_ENABLED", "false")
 PAPER_INITIAL_CASH: Final[float] = float(os.getenv("PAPER_INITIAL_CASH", "10000"))
 PAPER_FEE_PCT: Final[float] = float(os.getenv("PAPER_FEE_PCT", str(FEE_PCT)))
 PAPER_SLIPPAGE_PCT: Final[float] = float(os.getenv("PAPER_SLIPPAGE_PCT", "0.0"))
+CHOP_GUARD_ENABLED: Final[bool] = os.getenv("CHOP_GUARD_ENABLED", "true").lower() == "true"
+CHOP_GUARD_WINDOW_MINUTES: Final[int] = int(os.getenv("CHOP_GUARD_WINDOW_MINUTES", "90"))
+CHOP_GUARD_FAST_EXIT_MINUTES: Final[int] = int(os.getenv("CHOP_GUARD_FAST_EXIT_MINUTES", "20"))
+CHOP_GUARD_ADVERSE_PNL_PCT: Final[float] = float(os.getenv("CHOP_GUARD_ADVERSE_PNL_PCT", "-0.10"))
+CHOP_GUARD_CAUTION_EXIT_COUNT: Final[int] = int(os.getenv("CHOP_GUARD_CAUTION_EXIT_COUNT", "2"))
+CHOP_GUARD_LOCK_EXIT_COUNT: Final[int] = int(os.getenv("CHOP_GUARD_LOCK_EXIT_COUNT", "3"))
+CHOP_GUARD_LOCK_STOP_COUNT: Final[int] = int(os.getenv("CHOP_GUARD_LOCK_STOP_COUNT", "2"))
+CHOP_GUARD_PROBABILITY_BUFFER: Final[float] = float(os.getenv("CHOP_GUARD_PROBABILITY_BUFFER", "0.03"))
+CHOP_GUARD_RISK_SCALE: Final[float] = float(os.getenv("CHOP_GUARD_RISK_SCALE", "0.5"))
+CHOP_GUARD_NOTIONAL_SCALE: Final[float] = float(os.getenv("CHOP_GUARD_NOTIONAL_SCALE", "0.6"))
+CHOP_GUARD_BLOCK_MINUTES: Final[int] = int(os.getenv("CHOP_GUARD_BLOCK_MINUTES", "45"))
 
 # Eventos macro. Vacia por defecto; si queda vacia, el guardian deja pasar.
 MACRO_EVENT_TIMES_UTC: Final[list[str]] = []

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import time
+
 import fakeredis.aioredis
 
 from execution.position_exit import PositionExitPolicy
 from execution.position_sizer import KellyFractionalSizer
 from paper.paper_trader import PaperTrader
+from risk.guardian import RiskGuardian
 
 
 def fixed_sizer(base_notional: float) -> KellyFractionalSizer:
@@ -200,3 +203,101 @@ def test_paper_trader_dynamic_sizer_increases_notional_on_strong_signal() -> Non
     assert event["decision"] == "paper_buy_filled"
     assert event["sizing_notional_usd"] > 25
     assert event["sizing_dynamic"] == "true"
+
+
+def test_paper_trader_blocks_rebuy_when_chop_guard_detects_stop_loss() -> None:
+    guardian = RiskGuardian(
+        chop_caution_exit_count=5,
+        chop_lock_exit_count=5,
+        chop_lock_stop_count=1,
+        chop_block_minutes=30,
+        chop_window_minutes=120,
+    )
+    trader = PaperTrader(
+        redis_client=fakeredis.aioredis.FakeRedis(decode_responses=True),
+        guardian=guardian,
+        initial_cash=20000,
+        order_notional_usd=100,
+        fee_pct=0.0,
+        slippage_pct=0.0,
+        exit_policy=PositionExitPolicy(stop_loss_pct=1.0, take_profit_pct=50.0, max_hold_minutes=120),
+        position_sizer=fixed_sizer(100),
+    )
+    now_ms = int(time.time() * 1000)
+    trader.handle_candle({"product_id": "BTC-USD", "close": "100", "close_time": str(now_ms)})
+    trader.handle_signal(
+        {
+            "product_id": "BTC-USD",
+            "signal": "BUY",
+            "prob_buy": 0.9,
+            "model_id": "m1",
+            "registry_key": "btc_usdt",
+            "actionable": "true",
+        }
+    )
+    exit_event = trader.handle_candle(
+        {
+            "product_id": "BTC-USD",
+            "close": "98.8",
+            "close_time": str(int(time.time() * 1000)),
+        }
+    )
+    trader.handle_candle({"product_id": "BTC-USD", "close": "100"})
+    rebuy = trader.handle_signal(
+        {
+            "product_id": "BTC-USD",
+            "signal": "BUY",
+            "prob_buy": 0.95,
+            "model_id": "m1",
+            "registry_key": "btc_usdt",
+            "actionable": "true",
+        }
+    )
+
+    assert exit_event is not None
+    assert exit_event["reason"] == "stop_loss_hit"
+    assert rebuy["decision"] == "blocked_risk"
+    assert "CHOP" in rebuy["reason"]
+
+
+def test_paper_trader_scales_notional_when_asset_is_in_caution_mode() -> None:
+    now_ms = int(time.time() * 1000)
+    guardian = RiskGuardian(
+        min_signal_prob=0.62,
+        chop_caution_exit_count=1,
+        chop_lock_exit_count=5,
+        chop_lock_stop_count=5,
+        chop_probability_buffer=0.02,
+        chop_notional_scale=0.5,
+    )
+    guardian.register_exit(
+        "BTC-USD",
+        reason="signal_exit_long",
+        pnl_pct=-0.25,
+        timestamp_ms=now_ms,
+        holding_minutes=5.0,
+    )
+    trader = PaperTrader(
+        redis_client=fakeredis.aioredis.FakeRedis(decode_responses=True),
+        guardian=guardian,
+        initial_cash=20000,
+        order_notional_usd=100,
+        fee_pct=0.0,
+        slippage_pct=0.0,
+        position_sizer=fixed_sizer(100),
+    )
+    trader.handle_candle({"product_id": "BTC-USD", "close": "100"})
+    event = trader.handle_signal(
+        {
+            "product_id": "BTC-USD",
+            "signal": "BUY",
+            "prob_buy": 0.9,
+            "model_id": "m1",
+            "registry_key": "btc_usdt",
+            "actionable": "true",
+        }
+    )
+
+    assert event["decision"] == "paper_buy_filled"
+    assert event["sizing_notional_usd"] == 50.0
+    assert "chop_caution" in event["sizing_reason"]

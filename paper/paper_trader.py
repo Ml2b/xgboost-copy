@@ -11,7 +11,7 @@ from loguru import logger
 
 from config import settings
 from execution.position_exit import PositionExitPolicy
-from execution.position_sizer import KellyFractionalSizer, PositionSizingDecision
+from execution.position_sizer import KellyFractionalSizer, PositionSizingDecision, scale_position_sizing_decision
 from risk.guardian import Portfolio, RiskGuardian
 
 
@@ -298,12 +298,20 @@ class PaperTrader:
             drawdown_hoy=self.current_state().drawdown_pct,
             posiciones_abiertas=len(self.positions),
         )
+        chop_adjustment = self.guardian.entry_adjustment(product_id, timestamp_ms=timestamp_ms)
         sizing_decision = self.position_sizer.size(
             prob_buy=prob_buy,
-            buy_threshold=buy_threshold,
+            buy_threshold=max(buy_threshold, chop_adjustment.min_signal_prob),
             capital_total=equity,
             capital_available=self.cash,
         )
+        if chop_adjustment.cautious and chop_adjustment.notional_scale < 1.0:
+            sizing_decision = scale_position_sizing_decision(
+                sizing_decision,
+                scale=chop_adjustment.notional_scale,
+                capital_total=equity,
+                reason_tag="chop_caution",
+            )
         target_notional = float(sizing_decision.notional_usd)
         allowed, reason = self.guardian.check(
             {
@@ -460,6 +468,15 @@ class PaperTrader:
         self.realized_pnl += realized_pnl
         self.positions.pop(product_id, None)
         self.sell_fills += 1
+        holding_minutes = max(0.0, (timestamp_ms - position.opened_at_ms) / 60_000.0)
+        pnl_pct = 0.0 if position.entry_price <= 0 else ((execution_price / position.entry_price) - 1.0) * 100.0
+        self.guardian.register_exit(
+            product_id,
+            reason=exit_reason,
+            pnl_pct=pnl_pct,
+            timestamp_ms=timestamp_ms,
+            holding_minutes=holding_minutes,
+        )
         state = self.current_state()
         logger.info(
             "PaperTrader EXIT filled. product_id={} qty={} fill_price={} realized_pnl={} cash={} equity={} reason={}",
